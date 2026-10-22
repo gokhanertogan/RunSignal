@@ -57,3 +57,19 @@ jobs:
       - run: sudo apt-get install -y redis-server   # the BullMQ tests start their own instance
       - run: npm ci
       - run: npm test
+
+  java:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        spring-boot: ['3.2.12', '3.5.16', '4.1.2']
+    defaults:
+      run:
+        working-directory: src/RunSignal.Java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: mvn -B install -Dspring-boot.version=${{ matrix.spring-boot }}

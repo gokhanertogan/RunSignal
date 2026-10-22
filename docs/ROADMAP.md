@@ -83,7 +83,13 @@ agreement; the first ones cover workload naming.
    - Verified live: the .NET CLI provisioned its alerts unchanged.
    - Found live: OpenTelemetry JS's global meter provider is not a proxy, so a registry created by an import before the SDK started recorded nothing. The registry now follows the global provider.
    - Found on the way: BullMQ 6 needs a constructed ioredis client in ESM.
-3. **Java**: Spring Boot starter with `@Scheduled` and Spring Batch integration.
+3. **Java** ✅ ([src/RunSignal.Java](../src/RunSignal.Java)):
+   - `runsignal` core, which depends only on `opentelemetry-api`, and `runsignal-spring-boot-starter`.
+   - The starter records every `@Scheduled` run through Spring's own scheduling observations, with no proxies. It registers cron jobs at startup, resolving placeholders and macros, and writes the manifest from `runsignal.manifest-path`.
+   - Tested against Spring Boot 3.2, 3.5 and 4.1.
+   - Verified live: the .NET CLI provisioned its alerts unchanged.
+   - Lazy `GlobalOpenTelemetry` resolution avoids fixing the global instance to a no-op before the agent starts.
+   - Follow-up: Spring Batch.
 4. **Rust**: `tokio` helpers.
 
 Still to do: extend the conformance suite beyond names, by running the same scenarios against every SDK and comparing the exported OTLP with golden files.
