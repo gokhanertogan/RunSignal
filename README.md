@@ -14,8 +14,9 @@ RunSignal records **runs, items and heartbeats** of background work as OpenTelem
 same names in every language. From them it provisions the alerts you need, sent to Teams or Slack:
 **missed**, **overrun**, **stalled**, **low-output** and **failure-rate**.
 
-> Status: early development. The .NET packages (core, dependency injection, OpenTelemetry, Hangfire and
-> Quartz.NET) work; New Relic provisioning, the CLI and other languages are next.
+> Status: early development. The .NET packages (core, dependency injection, OpenTelemetry, Hangfire,
+> Quartz.NET), New Relic provisioning and the `runsignal` CLI work, and have been verified end to end against a
+> live New Relic account. Other languages are next.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why RunSignal
@@ -48,7 +49,8 @@ same names in every language. From them it provisions the alerts you need, sent 
 | `RunSignal.OpenTelemetry` | `AddRunSignalInstrumentation()` for metrics and traces | ✅ Working |
 | `RunSignal.Hangfire` | Monitors every Hangfire job (Hangfire 1.8+) | ✅ Working |
 | `RunSignal.Quartz` | Monitors every Quartz.NET job (Quartz 3.x; 4.x planned) | ✅ Working |
-| `RunSignal.NewRelic` / `RunSignal.Cli` | Alert provisioning (`runsignal diff` / `provision`) | Planned |
+| `RunSignal.NewRelic` | Plans and provisions New Relic alerts from a manifest | ✅ Working |
+| `RunSignal.Cli` | The `runsignal` tool: `plan`, `diff`, `provision` | ✅ Working |
 | `RunSignal.Java` / `.Node` / `.Go` / `.Rust` | SDKs for other languages | Planned |
 
 The packages are not on NuGet yet.
@@ -203,8 +205,9 @@ The service name defaults to `OTEL_SERVICE_NAME`, then the entry assembly name, 
 The manifest comes from the running application, not the build, because schedules such as Hangfire recurring
 jobs exist only at runtime.
 
-A runnable example that prints the signals to the console is in
-[samples/RunSignal.Samples.Worker](samples/RunSignal.Samples.Worker): `dotnet run --project samples/RunSignal.Samples.Worker`.
+A runnable example is in [samples/RunSignal.Samples.Worker](samples/RunSignal.Samples.Worker):
+`dotnet run --project samples/RunSignal.Samples.Worker`. It prints the signals to the console, or sends them to
+New Relic when `NEW_RELIC_LICENSE_KEY` (and `NEW_RELIC_REGION=EU` for the EU data center) is set.
 
 ## Signals
 
@@ -214,11 +217,16 @@ A runnable example that prints the signals to the console is in
 | `runsignal.workload.duration` (s) | `runsignal.workload`, `runsignal.outcome` |
 | `runsignal.workload.items` | `runsignal.workload`, `runsignal.item.result` (`processed` / `failed`) |
 | `runsignal.workload.heartbeats` | `runsignal.workload` |
-| `runsignal.workload.last_success` (Unix s) | `runsignal.workload` |
+| `runsignal.workload.since_success` (s) | `runsignal.workload` |
+| `runsignal.workload.since_heartbeat` (s) | `runsignal.workload` |
 
-Each run is also an `INTERNAL` span named after the workload. A process that has died cannot report that it
-is missing, so RunSignal never evaluates alerts in-process: the backend detects missed and stalled work from
-these signals. The full contract is in [spec/README.md](spec/README.md).
+Each run is also an `INTERNAL` span named after the workload. RunSignal never evaluates alerts in-process,
+because a process that has died cannot report that it is missing. The backend alerts on these signals instead.
+
+The two `since_*` gauges report how long ago the last success or heartbeat happened. Until the first one,
+they count from when the workload was registered. Without them, a job that never runs would never report
+anything, and backends can only notice that a signal stopped if it reported at least once. With them, a job that
+never starts still looks overdue. The full contract is in [spec/README.md](spec/README.md).
 
 ## Performance
 
@@ -229,10 +237,70 @@ Measured with BenchmarkDotNet on .NET 10 (Apple Silicon); run them with
 |---|---|---|
 | `Start()` + `Succeed()` | ~35–40 ns | 0 B |
 | `RunAsync` (synchronously completing work) | ~42 ns | 0 B |
-| `Processed()` / `Beat()` | ~1–6 ns | 0 B |
+| `Processed()` | ~1–6 ns | 0 B |
+| `Beat()` | ~14 ns | 0 B |
 
 The times include a metrics listener but not the exporter's own aggregation, which the OpenTelemetry SDK adds
 on top. Spans allocate only when a tracer samples them.
+
+## New Relic
+
+### 1. Export the signals
+
+Send the signals to New Relic over OTLP with **delta temporality**. With the OpenTelemetry .NET default
+(cumulative), the last value is re-exported every interval, so a stopped workload never looks stopped:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("billing-service"))      // must match the manifest's service
+    .WithMetrics(m => m
+        .AddRunSignalInstrumentation()
+        .AddOtlpExporter((exporter, reader) =>
+        {
+            exporter.Endpoint = new Uri("https://otlp.eu01.nr-data.net");  // US: https://otlp.nr-data.net
+            exporter.Headers = $"api-key={licenseKey}";                    // an ingest (license) key
+            reader.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
+        }));
+```
+
+Or set `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta`.
+
+### 2. Create the notification channels once
+
+In New Relic, create a Teams or Slack destination and a channel for it (**Alerts → Destinations**), and note
+the channel ID. Slack destinations can only be created in the UI, because they use OAuth.
+
+### 3. Provision from CI
+
+```bash
+dotnet tool install -g RunSignal.Cli
+
+RUNSIGNAL_MANIFEST_PATH=runsignal.json dotnet run      # or take the manifest from a test run
+export NEW_RELIC_API_KEY=NRAK-...                       # a User API key
+
+runsignal plan runsignal.json                           # offline: what alerts this produces
+runsignal diff runsignal.json --account-id 1234567 --region EU --channel critical=<teams-channel-id>
+runsignal provision runsignal.json --account-id 1234567 --region EU \
+    --channel critical=<teams-channel-id> --channel warning=<slack-channel-id>
+```
+
+`provision` creates one policy per service and severity (`RunSignal: billing-service (critical)`), its NRQL
+conditions, and a workflow that sends that policy's incidents to the given channels. It is idempotent: running
+it again changes only what changed in the manifest. It deletes conditions it created that are no longer in the
+manifest, and never touches conditions it did not create. Policies for `info` get no workflow unless you give
+them a channel.
+
+| Alert | Fires when | From |
+|---|---|---|
+| `missed` | No success for longer than the longest gap in the schedule plus grace (`maxDuration`, or 15 min), or the service stops reporting for 15 min | `schedule` |
+| `failed` | A run fails (only when there is no `failureRateThreshold`) | `schedule` |
+| `stalled` | No heartbeat for `expectEvery`, or the service stops reporting for 15 min | `expectEvery` |
+| `overrun` | A run took longer than `maxDuration` | `maxDuration` |
+| `low output` | Successful runs processed fewer than `minProcessed` items on average within an hour | `minProcessed` |
+| `failure rate` / `item failure rate` | More than `failureRateThreshold` of runs / items failed within 15 min | `failureRateThreshold` |
+
+Schedules are read in UTC unless you pass `--time-zone Europe/Istanbul`. Tune the grace and the reporting
+timeout with `--missed-grace` and `--not-reporting-after` (minutes).
 
 ## Building
 

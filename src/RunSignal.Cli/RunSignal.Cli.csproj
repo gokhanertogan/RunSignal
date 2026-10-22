@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>RunSignal.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>runsignal</ToolCommandName>
+    <RollForward>Major</RollForward>
+    <IsAotCompatible>false</IsAotCompatible>
+
+    <PackageId>RunSignal.Cli</PackageId>
+    <Title>RunSignal CLI: provision alerts for background jobs from a workload manifest</Title>
+    <Description>The runsignal command: plan, diff and provision New Relic alerts (missed, overrun, stalled, low-output and failure-rate) for the background jobs listed in RunSignal workload manifests. Idempotent and safe to run in CI.</Description>
+    <PackageTags>$(PackageTags);cli;dotnet-tool;nerdgraph;alerts-as-code</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.NewRelic\RunSignal.NewRelic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RunSignal.Tests" />
+  </ItemGroup>
+
+</Project>

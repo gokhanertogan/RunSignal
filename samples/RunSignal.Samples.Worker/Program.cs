@@ -4,10 +4,15 @@ using OpenTelemetry.Trace;
 using RunSignal;
 
 // Two workloads that HTTP monitoring never sees: a loop that syncs stock, and a job that imports invoices.
-// Metrics are printed to the console every 10 seconds; point an OTLP exporter at New Relic instead in production.
+// With NEW_RELIC_LICENSE_KEY set, signals go to New Relic over OTLP (NEW_RELIC_REGION=EU for the EU data center);
+// otherwise metrics are printed to the console every 10 seconds.
 var builder = Host.CreateApplicationBuilder(args);
+var licenseKey = Environment.GetEnvironmentVariable("NEW_RELIC_LICENSE_KEY");
+var otlpEndpoint = new Uri(string.Equals(Environment.GetEnvironmentVariable("NEW_RELIC_REGION"), "EU", StringComparison.OrdinalIgnoreCase)
+    ? "https://otlp.eu01.nr-data.net:4317"
+    : "https://otlp.nr-data.net:4317");
 
-builder.Services.AddRunSignal()
+builder.Services.AddRunSignal(o => o.ServiceName = "runsignal-sample")
     .AddWorkload("stock-sync", o =>
     {
         o.ExpectEvery = TimeSpan.FromMinutes(5);
@@ -23,12 +28,37 @@ builder.Services.AddRunSignal()
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("runsignal-sample"))
-    .WithMetrics(m => m
-        .AddRunSignalInstrumentation()
-        .AddConsoleExporter((_, reader) => reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10_000))
-    .WithTracing(t => t
-        .AddRunSignalInstrumentation()
-        .AddConsoleExporter());
+    .WithMetrics(m =>
+    {
+        m.AddRunSignalInstrumentation();
+        if (licenseKey is null)
+        {
+            m.AddConsoleExporter((_, reader) => reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10_000);
+            return;
+        }
+
+        m.AddOtlpExporter((exporter, reader) =>
+        {
+            exporter.Endpoint = otlpEndpoint;
+            exporter.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+            exporter.Headers = $"api-key={licenseKey}";
+            reader.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
+            reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 30_000;
+        });
+    })
+    .WithTracing(t =>
+    {
+        t.AddRunSignalInstrumentation();
+        if (licenseKey is null)
+            t.AddConsoleExporter();
+        else
+            t.AddOtlpExporter(exporter =>
+            {
+                exporter.Endpoint = otlpEndpoint;
+                exporter.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+                exporter.Headers = $"api-key={licenseKey}";
+            });
+    });
 
 builder.Services.AddHostedService<StockSyncWorker>();
 builder.Services.AddHostedService<InvoiceImportWorker>();

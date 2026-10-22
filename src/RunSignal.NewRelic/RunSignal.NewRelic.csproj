@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RunSignal.NewRelic</PackageId>
+    <Title>RunSignal.NewRelic: provision New Relic alerts for background jobs from a RunSignal manifest</Title>
+    <Description>Turns a RunSignal workload manifest into New Relic NRQL alert conditions (missed, overrun, stalled, low-output and failure-rate) and creates or updates them through NerdGraph, routed by severity to your Teams or Slack workflows.</Description>
+    <PackageTags>$(PackageTags);nerdgraph;nrql;alerts-as-code</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RunSignal.Tests" />
+  </ItemGroup>
+
+</Project>

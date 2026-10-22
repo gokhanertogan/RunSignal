@@ -29,6 +29,8 @@
     <ProjectReference Include="..\..\src\RunSignal.OpenTelemetry\RunSignal.OpenTelemetry.csproj" />
     <ProjectReference Include="..\..\src\RunSignal.Hangfire\RunSignal.Hangfire.csproj" />
     <ProjectReference Include="..\..\src\RunSignal.Quartz\RunSignal.Quartz.csproj" />
+    <ProjectReference Include="..\..\src\RunSignal.NewRelic\RunSignal.NewRelic.csproj" />
+    <ProjectReference Include="..\..\src\RunSignal.Cli\RunSignal.Cli.csproj" />
   </ItemGroup>
 
 </Project>

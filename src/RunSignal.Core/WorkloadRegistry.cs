@@ -28,7 +28,7 @@ public sealed partial class WorkloadRegistry : IDisposable
             _meter = meterFactory.Create(RunSignalTelemetry.MeterName, WorkloadInstruments.Version);
         }
 
-        _instruments = new WorkloadInstruments(_meter, ObserveLastSuccess);
+        _instruments = new WorkloadInstruments(_meter, ObserveSinceSuccess, ObserveSinceHeartbeat);
     }
 
     /// <summary>A process-wide registry for code that does not use dependency injection.</summary>
@@ -163,13 +163,21 @@ public sealed partial class WorkloadRegistry : IDisposable
             _meter.Dispose();
     }
 
-    private IEnumerable<Measurement<long>> ObserveLastSuccess()
+    private IEnumerable<Measurement<double>> ObserveSinceSuccess()
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         foreach (var workload in _workloads.Values)
         {
-            if (workload.TryGetLastSuccessUnixSeconds(now, out var lastSuccess))
-                yield return new Measurement<long>(lastSuccess, new KeyValuePair<string, object?>(RunSignalTelemetry.Attributes.Workload, workload.Name));
+            if (workload.TryGetSecondsSinceSuccess(out var seconds))
+                yield return new Measurement<double>(seconds, new KeyValuePair<string, object?>(RunSignalTelemetry.Attributes.Workload, workload.Name));
+        }
+    }
+
+    private IEnumerable<Measurement<double>> ObserveSinceHeartbeat()
+    {
+        foreach (var workload in _workloads.Values)
+        {
+            if (workload.TryGetSecondsSinceHeartbeat(out var seconds))
+                yield return new Measurement<double>(seconds, new KeyValuePair<string, object?>(RunSignalTelemetry.Attributes.Workload, workload.Name));
         }
     }
 

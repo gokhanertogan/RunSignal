@@ -31,9 +31,21 @@ language.
 | `runsignal.workload.duration` | Histogram (double) | `s` | `runsignal.workload`, `runsignal.outcome` | Run duration |
 | `runsignal.workload.items` | Counter (int) | `{item}` | `runsignal.workload`, `runsignal.item.result` | Items handled |
 | `runsignal.workload.heartbeats` | Counter (int) | `{heartbeat}` | `runsignal.workload` | Heartbeats |
-| `runsignal.workload.last_success` | Gauge (int) | `s` | `runsignal.workload` | Unix time of the last successful run |
+| `runsignal.workload.since_success` | Gauge (double) | `s` | `runsignal.workload` | Seconds since the last successful run** |
+| `runsignal.workload.since_heartbeat` | Gauge (double) | `s` | `runsignal.workload` | Seconds since the last heartbeat*** |
 
 \* `error.type` is present only when `runsignal.outcome` is `failure`.
+
+\*\* Until the first success, counted from when the workload was registered. Reported for workloads that have a
+`schedule` or have started a run.
+
+\*\*\* Until the first heartbeat, counted from when the workload was registered. Reported for workloads that have
+`expectEvery` or have sent a heartbeat.
+
+The two gauges exist because backends can only notice that a signal stopped if it reported at least once
+(New Relic's loss-of-signal, for example). A job that never runs never reports a run. Its `since_success`
+keeps growing from registration instead, so a plain threshold catches it. Gauges are reported on every export
+while the process is alive, so loss of signal on them means the process itself stopped reporting.
 
 ### Attribute values
 
@@ -61,8 +73,11 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 ## Performance requirements
 
 - Recording a run, an item or a heartbeat must not allocate on the heap when no span is being recorded.
-- SDKs must not evaluate alert rules in-process. A process that has died or hung cannot report that it is
-  missing, so absence (`missed`, `stalled`) is always detected by the backend from the signals above.
+- SDKs must not evaluate alert rules in-process. A process that has died cannot report that it is missing, so
+  the backend detects absence: `missed` and `stalled` from the `since_*` gauges, and a dead process from loss
+  of signal on those gauges.
+- Counters must be exported with **delta** temporality. With cumulative temporality the last value is
+  re-exported on every interval, so a backend never sees a signal stop.
 
 ## Workload expectations (used for alert provisioning)
 

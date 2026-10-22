@@ -27,8 +27,17 @@ public static class RunSignalTelemetry
         /// <summary>Counter of heartbeats.</summary>
         public const string Heartbeats = "runsignal.workload.heartbeats";
 
-        /// <summary>Gauge of the Unix time, in seconds, of the last successful run.</summary>
-        public const string LastSuccess = "runsignal.workload.last_success";
+        /// <summary>
+        /// Gauge of the seconds since the last successful run, or since the workload was registered if it has not
+        /// succeeded yet. Reported for workloads that have a schedule or have run. Alerts on missed runs use it.
+        /// </summary>
+        public const string SinceSuccess = "runsignal.workload.since_success";
+
+        /// <summary>
+        /// Gauge of the seconds since the last heartbeat, or since the workload was registered if it has not sent one.
+        /// Reported for workloads that expect heartbeats or have sent one. Alerts on stalled loops use it.
+        /// </summary>
+        public const string SinceHeartbeat = "runsignal.workload.since_heartbeat";
     }
 
     /// <summary>Attribute (tag) names.</summary>

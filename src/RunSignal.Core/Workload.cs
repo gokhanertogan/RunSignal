@@ -18,8 +18,12 @@ public sealed class Workload
     private readonly WorkloadInstruments _instruments;
     private readonly KeyValuePair<string, object?> _nameTag;
 
-    // Stopwatch timestamp of the last successful run; 0 until the first one.
+    // Stopwatch timestamps. Until the first success or heartbeat they hold the time the workload was created, so a
+    // workload that never succeeds or never beats still reports a growing age, which the backend alerts on.
     private long _lastSuccessTimestamp;
+    private long _lastHeartbeatTimestamp;
+    private bool _hasStarted;
+    private bool _hasBeaten;
 
     internal Workload(string name, WorkloadOptions options, WorkloadInstruments instruments)
     {
@@ -27,6 +31,7 @@ public sealed class Workload
         Options = options;
         _instruments = instruments;
         _nameTag = new(RunSignalTelemetry.Attributes.Workload, name);
+        _lastSuccessTimestamp = _lastHeartbeatTimestamp = Stopwatch.GetTimestamp();
     }
 
     /// <summary>The workload's stable name, such as <c>nightly-invoice</c>.</summary>
@@ -40,6 +45,8 @@ public sealed class Workload
     {
         var activity = WorkloadInstruments.ActivitySource.StartActivity(Name, ActivityKind.Internal);
         activity?.SetTag(RunSignalTelemetry.Attributes.Workload, Name);
+        if (!_hasStarted)
+            _hasStarted = true;
         return new WorkloadRun(this, Stopwatch.GetTimestamp(), activity);
     }
 
@@ -108,19 +115,27 @@ public sealed class Workload
     }
 
     /// <summary>Records a heartbeat: the workload is alive and making progress.</summary>
-    public void Beat() => _instruments.Heartbeats.Add(1, _nameTag);
-
-    internal bool TryGetLastSuccessUnixSeconds(long nowUnixSeconds, out long lastSuccessUnixSeconds)
+    public void Beat()
     {
-        var timestamp = Volatile.Read(ref _lastSuccessTimestamp);
-        if (timestamp == 0)
-        {
-            lastSuccessUnixSeconds = 0;
-            return false;
-        }
+        Volatile.Write(ref _lastHeartbeatTimestamp, Stopwatch.GetTimestamp());
+        if (!_hasBeaten)
+            _hasBeaten = true;
+        _instruments.Heartbeats.Add(1, _nameTag);
+    }
 
-        lastSuccessUnixSeconds = nowUnixSeconds - (long)Stopwatch.GetElapsedTime(timestamp).TotalSeconds;
-        return true;
+    // Reported for workloads that are scheduled or have run, so alerts can tell a missed run from a workload
+    // that simply has no runs.
+    internal bool TryGetSecondsSinceSuccess(out double seconds)
+    {
+        seconds = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastSuccessTimestamp)).TotalSeconds;
+        return _hasStarted || Options.Schedule is not null;
+    }
+
+    // Reported for workloads that expect heartbeats or have sent one.
+    internal bool TryGetSecondsSinceHeartbeat(out double seconds)
+    {
+        seconds = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastHeartbeatTimestamp)).TotalSeconds;
+        return _hasBeaten || Options.ExpectEvery is not null;
     }
 
     internal void Complete(long startTimestamp, Activity? activity, Outcome outcome, string? errorType, Exception? exception, string? description)

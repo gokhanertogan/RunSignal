@@ -46,9 +46,24 @@ path, no in-process rule evaluation).
 - The manifest is written after startup when `RUNSIGNAL_MANIFEST_PATH` (or `RunSignalOptions.ManifestPath`) is set. It is written atomically, sorted, and without timestamps, so it diffs cleanly.
 - Changed from the original plan: the manifest comes from the running application instead of a build-time source generator. A generator cannot see Hangfire recurring jobs registered at runtime, cron triggers from configuration, or `AddWorkload` lambdas, so it would produce an incomplete manifest.
 
-### Phase 4: Alert provisioning
-- `RunSignal.NewRelic`: maps each expectation to a NRQL alert condition (missed, overrun, stalled, low-output, failure-rate), groups them into a policy per service, and connects Teams and Slack destinations through New Relic workflows. Severity drives routing.
-- `RunSignal.Cli` (`dotnet tool`): `runsignal diff` and `runsignal provision`, which read one or more manifests. These are idempotent and only touch resources RunSignal created (tag-based ownership), so they are safe to run in CI.
+### Phase 4: Alert provisioning ✅
+- `RunSignal.NewRelic`:
+  - `AlertPlanner` turns a manifest into NRQL conditions (missed, failed, stalled, overrun, low output, failure rate, item failure rate). It runs offline and needs no API.
+  - `NewRelicProvisioner` applies the plan through NerdGraph: one policy per service and severity, conditions marked as managed, and workflows routed to the channel IDs you give. It is idempotent and never touches conditions it did not create.
+- `RunSignal.Cli` (`dotnet tool`, command `runsignal`): `plan`, `diff` and `provision`, which read one or more manifests. Expected errors print one line, not a stack trace.
+- Spec change: `last_success` was replaced by the `since_success` and `since_heartbeat` gauges. New Relic's loss of signal only fires for signals that reported at least once, so a job that never runs could not otherwise be alerted on. The gauges count from registration until the first success or heartbeat. Delta temporality is now required, because with cumulative temporality a backend never sees a signal stop.
+- Verification: the API shapes and limits were checked against New Relic's Terraform provider, Go client and docs. Provisioning is tested end to end against a stateful in-memory NerdGraph, including idempotency.
+- Live test on a real New Relic account (EU), using the sample worker:
+  - All five metric types arrived over OTLP with delta temporality.
+  - `provision` created the policies and conditions, and a second run reported no changes.
+  - A failed run opened the `failed` incident.
+  - Stopping the process opened `missed` and `stalled` through loss of signal after 15 minutes.
+  - The live API also showed that EVENT_FLOW conditions require `aggregationDelay`, and that NerdGraph puts error details in `extensions`, which the CLI now prints.
+- Follow-ups:
+  - Not yet seen firing live: `overrun`, `low output`, the failure rates, and `missed` from its threshold alone (as opposed to from loss of signal).
+  - Low output is approximate for runs longer than its one-hour window.
+  - Overrun only sees runs that finish (a hung run shows up as missed or stalled).
+  - Workflows match one policy each.
 
 ### Phase 5: Other languages
 Thin SDKs on each language's OpenTelemetry API, in this order:
@@ -59,7 +74,11 @@ Thin SDKs on each language's OpenTelemetry API, in this order:
 
 A shared conformance suite runs the same scenarios against every SDK and compares the exported OTLP with golden files.
 
-### Phase 6: More backends
+### Phase 6: Notifications end to end (deferred to last)
+- Create notification channels from an existing Teams/Slack destination ID. The New Relic UI only creates channels inside workflows and does not show their IDs, so `--channel <id>` is awkward.
+- Verify a real Teams and Slack notification arriving from a RunSignal workflow.
+
+### Phase 7: More backends
 - Prometheus / Grafana alert rules and Datadog monitors from the same manifest.
 
 ## Decisions

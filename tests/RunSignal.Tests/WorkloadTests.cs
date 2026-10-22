@@ -127,20 +127,65 @@ public class WorkloadTests
     }
 
     [Fact]
-    public void Last_success_is_reported_only_after_a_successful_run()
+    public void Since_success_is_reported_for_scheduled_workloads_before_their_first_run()
     {
-        var name = TestNames.Unique("last-success");
+        var name = TestNames.Unique("scheduled");
+        using var recorder = new MetricRecorder(name);
+        s_registry.Get(name, o => o.Schedule = "0 2 * * *");
+
+        recorder.CollectObservable();
+
+        // Counted from registration, so a job that never runs still looks overdue to the backend.
+        Assert.InRange(Assert.Single(recorder.Of(Instruments.SinceSuccess)).Value, 0, 5);
+        Assert.Empty(recorder.Of(Instruments.SinceHeartbeat));
+    }
+
+    [Fact]
+    public void Since_success_is_not_reported_for_unscheduled_workloads_until_they_run()
+    {
+        var name = TestNames.Unique("unscheduled");
         using var recorder = new MetricRecorder(name);
         var workload = s_registry.Get(name);
 
+        recorder.CollectObservable();
+        Assert.Empty(recorder.Of(Instruments.SinceSuccess));
+
         workload.Start().Fail("boom");
         recorder.CollectObservable();
-        Assert.Empty(recorder.Of(Instruments.LastSuccess));
+        Assert.Single(recorder.Of(Instruments.SinceSuccess));
+    }
+
+    [Fact]
+    public async Task Since_success_resets_on_success_but_not_on_failure()
+    {
+        var name = TestNames.Unique("since-success");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name, o => o.Schedule = "* * * * *");
+        await Task.Delay(300);
+
+        workload.Start().Fail("boom");
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.SinceSuccess)[^1].Value >= 0.25);
 
         workload.Start().Succeed();
         recorder.CollectObservable();
-        var lastSuccess = Assert.Single(recorder.Of(Instruments.LastSuccess));
-        Assert.InRange(lastSuccess.Value, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 5, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        Assert.True(recorder.Of(Instruments.SinceSuccess)[^1].Value < 0.25);
+    }
+
+    [Fact]
+    public async Task Since_heartbeat_resets_on_beat()
+    {
+        var name = TestNames.Unique("since-beat");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name, o => o.ExpectEvery = TimeSpan.FromMinutes(5));
+        await Task.Delay(300);
+
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.SinceHeartbeat)[^1].Value >= 0.25);
+
+        workload.Beat();
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.SinceHeartbeat)[^1].Value < 0.25);
     }
 
     [Fact]
