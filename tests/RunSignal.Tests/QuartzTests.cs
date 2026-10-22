@@ -91,8 +91,20 @@ public sealed class QuartzTests : IAsyncLifetime
             TriggerBuilder.Create().WithCronSchedule("0/1 * * * * ?").Build());
 
         await recorder.WaitForAsync(Instruments.Runs);
-        Assert.Equal("0/1 * * * * ?", _registry.Get(name).Options.Schedule);
+        Assert.Equal("0/1 * * * * *", _registry.Get(name).Options.Schedule); // converted from Quartz format
     }
+
+    [Theory]
+    [InlineData("0 0 4 * * ?", "0 0 4 * * *")]
+    [InlineData("0 0 9 ? * 2-6", "0 0 9 * * 1-5")]          // Quartz counts SUN as 1
+    [InlineData("0 0 9 ? * 1,7", "0 0 9 * * 0,6")]
+    [InlineData("0 0 9 ? * 6#3", "0 0 9 * * 5#3")]          // third Friday: only the day shifts
+    [InlineData("0 0 9 ? * 6L", "0 0 9 * * 5L")]            // last Friday
+    [InlineData("0 0 9 ? * MON-FRI", "0 0 9 * * MON-FRI")]
+    [InlineData("0/30 * * * * ? 2026", "0/30 * * * * *")]   // the year is dropped
+    [InlineData("0 2 * * *", "0 2 * * *")]                  // not Quartz: unchanged
+    public void Quartz_crons_are_converted_to_the_standard_format(string quartz, string standard) =>
+        Assert.Equal(standard, QuartzCron.ToStandard(quartz));
 
     [Fact]
     public async Task Failed_job_records_the_original_exception_type()

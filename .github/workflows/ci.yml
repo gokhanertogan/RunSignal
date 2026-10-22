@@ -28,3 +28,18 @@ jobs:
         with:
           name: packages
           path: artifacts/*
+
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RunSignal.Go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/RunSignal.Go/go.mod
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l .)"
+      - run: go test -race ./...
+      - run: cd examples/worker && go build .

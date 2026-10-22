@@ -151,7 +151,21 @@ public sealed partial class WorkloadRegistry : IDisposable
         {
             if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)
                 continue;
-            builder.Append(c switch { 'ı' => 'i', 'ß' => 's', 'ø' => 'o', 'Ø' => 'O', 'æ' => 'a', 'Æ' => 'A', 'đ' => 'd', 'Đ' => 'D', 'ł' => 'l', 'Ł' => 'L', _ => c });
+            // Letters that do not decompose into a base letter and a mark.
+            switch (c)
+            {
+                case 'ı': builder.Append('i'); break;
+                case 'ß': builder.Append("ss"); break;
+                case 'ø': builder.Append('o'); break;
+                case 'Ø': builder.Append('O'); break;
+                case 'æ': builder.Append("ae"); break;
+                case 'Æ': builder.Append("Ae"); break;
+                case 'đ': builder.Append('d'); break;
+                case 'Đ': builder.Append('D'); break;
+                case 'ł': builder.Append('l'); break;
+                case 'Ł': builder.Append('L'); break;
+                default: builder.Append(c); break;
+            }
         }
         return builder.ToString();
     }

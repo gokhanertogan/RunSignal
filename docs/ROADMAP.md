@@ -66,13 +66,20 @@ path, no in-process rule evaluation).
   - Workflows match one policy each.
 
 ### Phase 5: Other languages
-Thin SDKs on each language's OpenTelemetry API, in this order:
-1. **Go**: K8s CronJobs and workers; `robfig/cron` integration.
+Thin SDKs on each language's OpenTelemetry API. Shared conformance vectors in `spec/conformance/` keep them in
+agreement; the first ones cover workload naming.
+
+1. **Go** ✅ ([src/RunSignal.Go](../src/RunSignal.Go)):
+   - The same instruments, attributes and manifest as .NET.
+   - `Workload.Run` with cancellation and panic handling, an `ErrorTyper` interface for stable error codes, and `rscron` for robfig/cron.
+   - No allocations on the hot path. `WithoutTracing()` is for workloads that run thousands of times per second, because the global tracer allocates per run.
+   - Verified live: a Go service exported the same metrics to New Relic, and the .NET `runsignal` CLI provisioned its alerts unchanged.
+   - Spec fix found on the way: 6-field cron now means seconds first with Unix day numbers (0 = Sunday), as robfig/cron, Spring and Cronos use. The Quartz integration converts Quartz's 1 = Sunday format before writing the manifest.
 2. **Node.js**: BullMQ integration.
 3. **Java**: Spring Boot starter with `@Scheduled` and Spring Batch integration.
 4. **Rust**: `tokio` helpers.
 
-A shared conformance suite runs the same scenarios against every SDK and compares the exported OTLP with golden files.
+Still to do: extend the conformance suite beyond names, by running the same scenarios against every SDK and comparing the exported OTLP with golden files.
 
 ### Phase 6: Notifications end to end (deferred to last)
 - Create notification channels from an existing Teams/Slack destination ID. The New Relic UI only creates channels inside workflows and does not show their IDs, so `--channel <id>` is awkward.

@@ -91,7 +91,7 @@ public class ManifestTests
         var manifest = WorkloadManifest.FromJson(await File.ReadAllTextAsync(path));
         Assert.Equal("erp", manifest.Service);
         Assert.Equal(["finance.month-end-close", "stock-sync", "supplier-price-sync"], manifest.Workloads.Select(w => w.Name));
-        Assert.Equal("0 0 23 * * ?", manifest.Workloads[0].Schedule);
+        Assert.Equal("0 0 23 * * *", manifest.Workloads[0].Schedule);
         Assert.Equal("0 6 * * *", manifest.Workloads[2].Schedule);
         Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
     }

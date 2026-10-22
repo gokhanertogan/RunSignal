@@ -2,24 +2,36 @@ namespace RunSignal.Tests;
 
 public class NamingTests
 {
+    // Shared with every SDK, so a job gets the same name in every language.
+    public static TheoryData<string, string> ConformanceNames()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var name in Conformance.Load("workload-names.json").GetProperty("names").EnumerateArray())
+            data.Add(name.GetProperty("input").GetString()!, name.GetProperty("expected").GetString()!);
+        return data;
+    }
+
+    public static TheoryData<string> ConformanceInvalidNames()
+    {
+        var data = new TheoryData<string>();
+        foreach (var input in Conformance.Load("workload-names.json").GetProperty("invalid").EnumerateArray())
+            data.Add(input.GetString()!);
+        return data;
+    }
+
     [Theory]
-    [InlineData("InvoiceJobs.GenerateInvoices", "invoice-jobs.generate-invoices")]
-    [InlineData("HTTPSync", "http-sync")]
-    [InlineData("Reports/Daily Sales", "reports-daily-sales")]
-    [InlineData("nightly-invoice", "nightly-invoice")]
-    [InlineData("  e-Arşiv gönderimi ", "e-arsiv-gonderimi")]
-    [InlineData("Günlük İrsaliye Işlemi", "gunluk-irsaliye-islemi")]
-    [InlineData("Job2Run", "job2-run")]
-    public void ToWorkloadName_produces_valid_names(string identifier, string expected)
+    [MemberData(nameof(ConformanceNames))]
+    public void ToWorkloadName_matches_the_conformance_vectors(string identifier, string expected)
     {
         Assert.Equal(expected, WorkloadRegistry.ToWorkloadName(identifier));
         using var registry = new WorkloadRegistry();
         registry.Get(expected); // must be accepted
     }
 
-    [Fact]
-    public void ToWorkloadName_rejects_identifiers_without_letters_or_digits() =>
-        Assert.Throws<ArgumentException>(() => WorkloadRegistry.ToWorkloadName("///"));
+    [Theory]
+    [MemberData(nameof(ConformanceInvalidNames))]
+    public void ToWorkloadName_rejects_the_conformance_invalid_inputs(string identifier) =>
+        Assert.Throws<ArgumentException>(() => WorkloadRegistry.ToWorkloadName(identifier));
 
     [Theory]
     [InlineData("90s", 90)]

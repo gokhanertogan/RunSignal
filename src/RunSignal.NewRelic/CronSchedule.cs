@@ -1,11 +1,12 @@
-using System.Text;
-using System.Text.RegularExpressions;
 using Cronos;
 
 namespace RunSignal.NewRelic;
 
-/// <summary>Reads the cron schedules in a manifest: 5-field Unix cron, or 6/7-field Quartz cron with seconds.</summary>
-public static partial class CronSchedule
+/// <summary>
+/// Reads the cron schedules in a manifest: 5-field Unix cron, or 6 fields with seconds first. Day of week is
+/// 0-7 with 0 and 7 meaning Sunday, as in Unix cron; the Quartz integration converts Quartz expressions to this.
+/// </summary>
+public static class CronSchedule
 {
     /// <summary>
     /// The longest gap between two consecutive runs over the next <paramref name="horizon"/> (default: 35 days, so
@@ -47,8 +48,8 @@ public static partial class CronSchedule
             return fields.Length switch
             {
                 5 => CronExpression.Parse(expression, CronFormat.Standard),
-                6 or 7 => CronExpression.Parse(FromQuartz(fields), CronFormat.IncludeSeconds),
-                _ => throw new FormatException($"Cron expression '{expression}' has {fields.Length} fields; expected 5 (Unix) or 6-7 (Quartz)."),
+                6 => CronExpression.Parse(expression, CronFormat.IncludeSeconds),
+                _ => throw new FormatException($"Cron expression '{expression}' has {fields.Length} fields; expected 5, or 6 with seconds first."),
             };
         }
         catch (CronFormatException ex)
@@ -56,23 +57,4 @@ public static partial class CronSchedule
             throw new FormatException($"Cron expression '{expression}' is invalid: {ex.Message}", ex);
         }
     }
-
-    // Quartz: sec min hour day-of-month month day-of-week [year], with '?' for "no value" and day-of-week 1-7 = SUN-SAT.
-    // Cronos:  sec min hour day-of-month month day-of-week, with day-of-week 0-6 = SUN-SAT. The year field is dropped.
-    private static string FromQuartz(string[] fields)
-    {
-        var builder = new StringBuilder();
-        for (var i = 0; i < 6; i++)
-        {
-            var field = fields[i] == "?" ? "*" : fields[i];
-            if (i == 5)
-                field = DayOfWeekNumber().Replace(field, m => (int.Parse(m.Value) - 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
-            builder.Append(field).Append(' ');
-        }
-        return builder.ToString().TrimEnd();
-    }
-
-    // A day-of-week number, but not the occurrence after '#' (in "6#3", only 6 is a day).
-    [GeneratedRegex("(?<!#)\\b[1-7]\\b")]
-    private static partial Regex DayOfWeekNumber();
 }

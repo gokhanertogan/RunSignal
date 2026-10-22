@@ -83,7 +83,7 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 
 | Field | Meaning | Alert it produces |
 |---|---|---|
-| `schedule` | Cron expression for when the workload should run: 5-field Unix cron, or 6/7-field Quartz cron with seconds | `missed` |
+| `schedule` | Cron expression for when the workload should run: 5-field Unix cron, or 6 fields with seconds first. Day of week is 0-7 with 0 and 7 = Sunday, as in Unix cron. SDKs convert scheduler-specific formats, such as Quartz's 1 = Sunday, before writing it | `missed` |
 | `maxDuration` | Longest acceptable run | `overrun` |
 | `expectEvery` | Longest acceptable gap between heartbeats | `stalled` |
 | `minProcessed` | Fewest items a run should process | `low-output` |

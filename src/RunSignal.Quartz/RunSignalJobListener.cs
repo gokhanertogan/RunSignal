@@ -13,8 +13,8 @@ namespace RunSignal.Quartz;
 /// The workload is named after a <see cref="WorkloadAttribute"/> name on the job class, or else the job key
 /// (<c>reports.DailySales</c> becomes <c>reports.daily-sales</c>; the <c>DEFAULT</c> group is left out).
 /// A job without an identity, whose key is a random GUID, is named after its class.
-/// A cron trigger's expression becomes the workload's schedule unless the attribute sets one; it is kept in
-/// Quartz format (with seconds).
+/// A cron trigger's expression becomes the workload's schedule unless the attribute sets one, converted from
+/// Quartz format to the standard one manifests use (see <see cref="QuartzCron.ToStandard"/>).
 /// </remarks>
 public sealed class RunSignalJobListener : IJobListener
 {
@@ -87,8 +87,8 @@ public sealed class RunSignalJobListener : IJobListener
         return registry.GetOrAdd(name, options =>
         {
             attribute?.ApplyTo(options);
-            if (options.Schedule is null && cronTrigger is not null)
-                options.Schedule = cronTrigger.CronExpressionString;
+            if (options.Schedule is null && cronTrigger?.CronExpressionString is { } cron)
+                options.Schedule = QuartzCron.ToStandard(cron);
         });
     }
 }

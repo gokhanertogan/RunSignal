@@ -1,0 +1,16 @@
+{
+  "description": "Every SDK must turn each input into the expected workload name, so the same job gets the same name, and the same alerts, in every language. Inputs listed under invalid must be rejected.",
+  "names": [
+    { "input": "InvoiceJobs.GenerateInvoices", "expected": "invoice-jobs.generate-invoices" },
+    { "input": "HTTPSync", "expected": "http-sync" },
+    { "input": "Reports/Daily Sales", "expected": "reports-daily-sales" },
+    { "input": "nightly-invoice", "expected": "nightly-invoice" },
+    { "input": "  e-Arşiv gönderimi ", "expected": "e-arsiv-gonderimi" },
+    { "input": "Günlük İrsaliye Işlemi", "expected": "gunluk-irsaliye-islemi" },
+    { "input": "Job2Run", "expected": "job2-run" },
+    { "input": "send_email_v2", "expected": "send_email_v2" },
+    { "input": "Straße Øresund", "expected": "strasse-oresund" },
+    { "input": "__private.Job__", "expected": "private.job" }
+  ],
+  "invalid": ["", "///", "   "]
+}
