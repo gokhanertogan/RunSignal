@@ -75,7 +75,14 @@ agreement; the first ones cover workload naming.
    - No allocations on the hot path. `WithoutTracing()` is for workloads that run thousands of times per second, because the global tracer allocates per run.
    - Verified live: a Go service exported the same metrics to New Relic, and the .NET `runsignal` CLI provisioned its alerts unchanged.
    - Spec fix found on the way: 6-field cron now means seconds first with Unix day numbers (0 = Sunday), as robfig/cron, Spring and Cronos use. The Quartz integration converts Quartz's 1 = Sunday format before writing the manifest.
-2. **Node.js**: BullMQ integration.
+2. **Node.js** ✅ ([src/RunSignal.Node](../src/RunSignal.Node), `@runsignal/node`):
+   - TypeScript, ESM.
+   - `workload.run` with AbortSignal cancellation; error types from `errorType`, then `code`, then the class name.
+   - BullMQ: an `instrument` processor wrapper and `discoverSchedulers`, which registers job schedulers with their cron patterns before they fire.
+   - Tests use a real Redis.
+   - Verified live: the .NET CLI provisioned its alerts unchanged.
+   - Found live: OpenTelemetry JS's global meter provider is not a proxy, so a registry created by an import before the SDK started recorded nothing. The registry now follows the global provider.
+   - Found on the way: BullMQ 6 needs a constructed ioredis client in ESM.
 3. **Java**: Spring Boot starter with `@Scheduled` and Spring Batch integration.
 4. **Rust**: `tokio` helpers.
 

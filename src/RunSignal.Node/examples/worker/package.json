@@ -1,0 +1,18 @@
+{
+  "name": "runsignal-node-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.223.0",
+    "@opentelemetry/resources": "^2.12.0",
+    "@opentelemetry/sdk-metrics": "^2.12.0",
+    "@runsignal/node": "file:../..",
+    "bullmq": "^6.4.0",
+    "ioredis": "^6.0.0"
+  }
+}

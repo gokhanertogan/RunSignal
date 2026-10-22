@@ -1,0 +1,65 @@
+{
+  "name": "@runsignal/node",
+  "version": "0.1.0",
+  "description": "Monitor Node.js background work that no HTTP status code describes (scheduled jobs, BullMQ queues, sync loops) with OpenTelemetry, and alert on missed, overrunning, stalled or low-output jobs.",
+  "license": "MIT",
+  "author": "Gokhan Ertogan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gokhanertogan/RunSignal.git",
+    "directory": "src/RunSignal.Node"
+  },
+  "keywords": [
+    "observability",
+    "opentelemetry",
+    "monitoring",
+    "alerting",
+    "background-jobs",
+    "cron",
+    "heartbeat",
+    "bullmq",
+    "newrelic"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./bullmq": {
+      "types": "./dist/bullmq.d.ts",
+      "default": "./dist/bullmq.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 'dist-test/test/**/*.test.js'",
+    "bench": "tsc -p tsconfig.test.json && node dist-test/test/bench.js"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "bullmq": ">=5.16.0"
+  },
+  "peerDependenciesMeta": {
+    "bullmq": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.12.0",
+    "@opentelemetry/sdk-metrics": "^2.12.0",
+    "@opentelemetry/sdk-trace-base": "^2.12.0",
+    "@types/node": "^26.6.5",
+    "bullmq": "^6.4.0",
+    "ioredis": "^6.0.0",
+    "typescript": "^7.0.2"
+  }
+}

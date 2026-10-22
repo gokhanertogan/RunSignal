@@ -15,9 +15,9 @@ same names in every language. From them it provisions the alerts you need, sent 
 **missed**, **overrun**, **stalled**, **low-output** and **failure-rate**.
 
 > Status: early development. The .NET packages (core, dependency injection, OpenTelemetry, Hangfire,
-> Quartz.NET), the Go SDK, New Relic provisioning and the `runsignal` CLI work. They have been verified end to
-> end against a live New Relic account, including a .NET and a Go service provisioned by the same CLI.
-> Java, Node.js and Rust are next.
+> Quartz.NET), the Go and Node.js SDKs, New Relic provisioning and the `runsignal` CLI work. They have been
+> verified end to end against a live New Relic account, with a .NET, a Go and a Node.js service provisioned by
+> the same CLI. Java and Rust are next.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why RunSignal
@@ -53,7 +53,8 @@ same names in every language. From them it provisions the alerts you need, sent 
 | `RunSignal.NewRelic` | Plans and provisions New Relic alerts from a manifest | ✅ Working |
 | `RunSignal.Cli` | The `runsignal` tool: `plan`, `diff`, `provision` | ✅ Working |
 | [`RunSignal.Go`](src/RunSignal.Go) | Go SDK with robfig/cron integration | ✅ Working |
-| `RunSignal.Java` / `.Node` / `.Rust` | SDKs for other languages | Planned |
+| [`RunSignal.Node`](src/RunSignal.Node) (`@runsignal/node`) | Node.js SDK with BullMQ integration | ✅ Working |
+| `RunSignal.Java` / `.Rust` | SDKs for other languages | Planned |
 
 The packages are not on NuGet yet.
 
