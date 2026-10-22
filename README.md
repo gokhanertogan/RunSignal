@@ -123,10 +123,10 @@ Without dependency injection, use `WorkloadRegistry.Shared.Get("name")` once and
 ## Hangfire
 
 ```csharp
-builder.Services.AddRunSignal();
+builder.Services.AddRunSignal().AddHangfire();   // discovers recurring jobs at startup
 builder.Services.AddHangfire((sp, config) => config
-    .UseInMemoryStorage()          // your storage
-    .UseRunSignal(sp));            // every job run is now a workload run
+    .UseInMemoryStorage()                         // your storage
+    .UseRunSignal(sp));                           // every job run is now a workload run
 ```
 
 That is all: success, failure (with the job's real exception type), cancellation on shutdown and duration are
@@ -154,11 +154,12 @@ take precedence over the attribute.
 ## Quartz.NET
 
 ```csharp
-builder.Services.AddRunSignal();
+builder.Services.AddRunSignal().AddQuartz();     // discovers scheduled jobs at startup
 builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>());
 ```
 
-Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Shared)`.
+Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Shared)` and
+`await scheduler.DiscoverRunSignalWorkloadsAsync(WorkloadRegistry.Shared)`.
 
 Jobs are named after their key (`reports.DailySales` becomes `reports.daily-sales`; the `DEFAULT` group is left
 out; a job scheduled without an identity, whose key is a random GUID, is named after its class), and a cron
@@ -168,6 +169,39 @@ trigger's expression becomes the schedule. `[Workload]` works on the job class, 
 
 Workload names are derived readably from any identifier, including non-ASCII ones: `e-Arşiv gönderimi` becomes
 `e-arsiv-gonderimi`.
+
+`AddHangfire()` and `AddQuartz()` register jobs as workloads as soon as the application starts, not when they
+first run. A job that never starts is exactly what the `missed` alert is for, so it has to be known before
+it runs.
+
+## Workload manifest
+
+The manifest lists every workload of a service and its expectations. The CLI will provision alerts from it
+([format](spec/manifest.schema.json)):
+
+```json
+{
+  "version": 1,
+  "service": "billing-service",
+  "workloads": [
+    { "name": "nightly-invoice", "schedule": "0 2 * * *", "maxDurationSeconds": 1800, "minProcessed": 100, "severity": "critical" },
+    { "name": "stock-sync", "expectEverySeconds": 300, "failureRateThreshold": 0.2, "severity": "warning" }
+  ]
+}
+```
+
+The application writes it once it has started and discovered its jobs. Turn it on with an environment
+variable, with no code change:
+
+```bash
+RUNSIGNAL_MANIFEST_PATH=artifacts/runsignal.json dotnet run
+```
+
+You can also set it in code: `AddRunSignal(o => { o.ManifestPath = "runsignal.json"; o.ServiceName = "billing-service"; })`.
+The service name defaults to `OTEL_SERVICE_NAME`, then the entry assembly name, and must match the
+`service.name` your signals are exported with. In code, use `registry.CreateManifest("billing-service").ToJson()`.
+The manifest comes from the running application, not the build, because schedules such as Hangfire recurring
+jobs exist only at runtime.
 
 A runnable example that prints the signals to the console is in
 [samples/RunSignal.Samples.Worker](samples/RunSignal.Samples.Worker): `dotnet run --project samples/RunSignal.Samples.Worker`.

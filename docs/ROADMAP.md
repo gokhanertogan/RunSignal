@@ -40,13 +40,15 @@ path, no in-process rule evaluation).
 - Integration tests against a real Hangfire server (in-memory storage) and a real Quartz scheduler.
 - Follow-up: Quartz.NET 4 support. Version 4 changed `IJob` and the listener interfaces to `ValueTask`, so it needs its own build (multi-targeted package or `RunSignal.Quartz4`).
 
-### Phase 3: Workload manifest
-- A JSON manifest of every workload and its expectations, with a JSON Schema in `spec/`.
-- A source generator that writes the manifest at build time from `[Workload]` attributes and `AddWorkload` calls, so the CLI needs no reflection and the code stays AOT-friendly.
+### Phase 3: Workload manifest ✅
+- A JSON manifest of every workload and its expectations ([spec/manifest.schema.json](../spec/manifest.schema.json)), serialized with System.Text.Json source generation (AOT-friendly, no new dependency in Core).
+- `IWorkloadDiscovery`: at startup, `AddHangfire()` registers every recurring job and `AddQuartz()` registers every scheduled job, so jobs that have never run get `missed` alerts. Discovery failures are logged and never stop the application.
+- The manifest is written after startup when `RUNSIGNAL_MANIFEST_PATH` (or `RunSignalOptions.ManifestPath`) is set. It is written atomically, sorted, and without timestamps, so it diffs cleanly.
+- Changed from the original plan: the manifest comes from the running application instead of a build-time source generator. A generator cannot see Hangfire recurring jobs registered at runtime, cron triggers from configuration, or `AddWorkload` lambdas, so it would produce an incomplete manifest.
 
 ### Phase 4: Alert provisioning
 - `RunSignal.NewRelic`: maps each expectation to a NRQL alert condition (missed, overrun, stalled, low-output, failure-rate), groups them into a policy per service, and connects Teams and Slack destinations through New Relic workflows. Severity drives routing.
-- `RunSignal.Cli` (`dotnet tool`): `runsignal scan`, `runsignal diff` and `runsignal provision`. These are idempotent and only touch resources RunSignal created (tag-based ownership), so they are safe to run in CI.
+- `RunSignal.Cli` (`dotnet tool`): `runsignal diff` and `runsignal provision`, which read one or more manifests. These are idempotent and only touch resources RunSignal created (tag-based ownership), so they are safe to run in CI.
 
 ### Phase 5: Other languages
 Thin SDKs on each language's OpenTelemetry API, in this order:

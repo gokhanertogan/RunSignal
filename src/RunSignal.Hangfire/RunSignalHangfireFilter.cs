@@ -41,7 +41,10 @@ public sealed class RunSignalHangfireFilter : JobFilterAttribute, IServerFilter
             return;
 
         var recurringJobId = GetRecurringJobId(context);
-        var workload = _workloads.GetOrAdd((job.Method, job.Type, recurringJobId), static (key, state) => state.Filter.Resolve(key.Method, key.Type, key.RecurringJobId, state.Context), (Filter: this, Context: context));
+        var workload = _workloads.GetOrAdd(
+            (job.Method, job.Type, recurringJobId),
+            static (key, state) => Resolve(state.Registry, key.Method, key.Type, key.RecurringJobId, () => GetRecurringJobCron(state.Context, key.RecurringJobId!)),
+            (Registry: _registry, Context: context));
 
         context.Items[WorkloadKey] = workload;
         context.Items[RunKey] = workload.Start();
@@ -71,17 +74,18 @@ public sealed class RunSignalHangfireFilter : JobFilterAttribute, IServerFilter
             run.Fail(exception);
     }
 
-    private Workload Resolve(MethodInfo method, Type type, string? recurringJobId, PerformContext context)
+    // Shared with HangfireWorkloadDiscovery so a job gets the same workload whether it was discovered or ran first.
+    internal static Workload Resolve(WorkloadRegistry registry, MethodInfo method, Type type, string? recurringJobId, Func<string?> getCron)
     {
         var attribute = method.GetCustomAttribute<WorkloadAttribute>() ?? type.GetCustomAttribute<WorkloadAttribute>();
         var name = attribute?.Name
             ?? (recurringJobId is not null ? WorkloadRegistry.ToWorkloadName(recurringJobId) : WorkloadRegistry.ToWorkloadName($"{type.Name}.{method.Name}"));
 
-        return _registry.GetOrAdd(name, options =>
+        return registry.GetOrAdd(name, options =>
         {
             attribute?.ApplyTo(options);
             if (options.Schedule is null && recurringJobId is not null)
-                options.Schedule = GetRecurringJobCron(context, recurringJobId);
+                options.Schedule = getCron();
         });
     }
 

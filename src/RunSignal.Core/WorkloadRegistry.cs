@@ -85,6 +85,21 @@ public sealed partial class WorkloadRegistry : IDisposable
         return _workloads.GetOrAdd(name, new Workload(name, options, _instruments));
     }
 
+    /// <summary>Describes every workload created so far, for alert provisioning.</summary>
+    /// <param name="service">The service name, matching the OpenTelemetry <c>service.name</c> the signals are exported with.</param>
+    public WorkloadManifest CreateManifest(string service)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(service);
+        return new WorkloadManifest
+        {
+            Service = service,
+            Workloads = _workloads.Values
+                .OrderBy(w => w.Name, StringComparer.Ordinal)
+                .Select(WorkloadManifestEntry.From)
+                .ToArray(),
+        };
+    }
+
     /// <summary>
     /// Turns an arbitrary job identifier, such as <c>InvoiceJobs.GenerateInvoices</c> or <c>Reports/Daily Sales</c>,
     /// into a valid workload name such as <c>invoice-jobs.generate-invoices</c> or <c>reports-daily-sales</c>.

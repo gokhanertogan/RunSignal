@@ -39,7 +39,7 @@ public sealed class RunSignalJobListener : IJobListener
     /// <inheritdoc />
     public Task JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
-        var workload = _workloads.GetOrAdd(context.JobDetail.Key, static (key, state) => state.Listener.Resolve(key, state.Context), (Listener: this, Context: context));
+        var workload = _workloads.GetOrAdd(context.JobDetail.Key, static (_, state) => Resolve(state.Registry, state.Context.JobDetail, state.Context.Trigger as ICronTrigger), (Registry: _registry, Context: context));
         context.Put(WorkloadKey, workload);
         context.Put(RunKey, workload.Start());
         return Task.CompletedTask;
@@ -72,20 +72,23 @@ public sealed class RunSignalJobListener : IJobListener
     /// <inheritdoc />
     public Task JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    private Workload Resolve(JobKey key, IJobExecutionContext context)
+    // Shared with QuartzWorkloadDiscovery so a job gets the same workload whether it was discovered or ran first.
+    internal static Workload Resolve(WorkloadRegistry registry, IJobDetail job, ICronTrigger? cronTrigger)
     {
-        var attribute = context.JobDetail.JobType.GetCustomAttribute<WorkloadAttribute>();
+        var key = job.Key;
+        var attribute = job.JobType.GetCustomAttribute<WorkloadAttribute>();
+
         // Jobs scheduled without an identity get a random GUID key, which would create a new workload on every
         // start; name those after the job class instead.
-        var keyName = Guid.TryParse(key.Name, out _) ? context.JobDetail.JobType.Name : key.Name;
+        var keyName = Guid.TryParse(key.Name, out _) ? job.JobType.Name : key.Name;
         var name = attribute?.Name
             ?? WorkloadRegistry.ToWorkloadName(key.Group == JobKey.DefaultGroup ? keyName : $"{key.Group}.{keyName}");
 
-        return _registry.GetOrAdd(name, options =>
+        return registry.GetOrAdd(name, options =>
         {
             attribute?.ApplyTo(options);
-            if (options.Schedule is null && context.Trigger is ICronTrigger cron)
-                options.Schedule = cron.CronExpressionString;
+            if (options.Schedule is null && cronTrigger is not null)
+                options.Schedule = cronTrigger.CronExpressionString;
         });
     }
 }

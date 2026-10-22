@@ -74,3 +74,25 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 | `minProcessed` | Fewest items a run should process | `low-output` |
 | `failureRateThreshold` | Highest acceptable share of failed runs or items (0–1) | `failure-rate` |
 | `severity` | `info` \| `warning` \| `critical` | Routing (for example critical → on-call) |
+
+## Workload manifest
+
+A manifest lists a service's workloads and their expectations. It is the input for alert provisioning. Its
+format is defined by [manifest.schema.json](manifest.schema.json):
+
+```json
+{
+  "version": 1,
+  "service": "billing-service",
+  "workloads": [
+    { "name": "nightly-invoice", "schedule": "0 2 * * *", "maxDurationSeconds": 1800, "minProcessed": 100, "severity": "critical" },
+    { "name": "stock-sync", "expectEverySeconds": 300, "failureRateThreshold": 0.2, "severity": "warning" }
+  ]
+}
+```
+
+SDKs produce the manifest from the running application, not at build time. Schedules often exist only at
+runtime (for example Hangfire recurring jobs registered in code, or cron triggers loaded from configuration), so
+only the running application knows its complete set of workloads. At startup, SDKs discover jobs that have not
+run yet from their schedulers, so a job that never starts still gets a `missed` alert. Durations are in seconds.
+Workloads are sorted by name, and the manifest contains no timestamps, so it diffs cleanly.

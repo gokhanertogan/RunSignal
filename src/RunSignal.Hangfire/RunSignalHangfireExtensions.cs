@@ -26,6 +26,19 @@ public static class RunSignalHangfireExtensions
     }
 
     /// <summary>
+    /// Registers every Hangfire recurring job as a workload when the application starts, so recurring jobs that
+    /// never run are alerted on and appear in the manifest. Uses the <see cref="JobStorage"/> from dependency
+    /// injection, or <see cref="JobStorage.Current"/>. Jobs are still recorded only after
+    /// <see cref="UseRunSignal(IGlobalConfiguration, IServiceProvider)"/>.
+    /// </summary>
+    public static RunSignalBuilder AddHangfire(this RunSignalBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Services.AddSingleton<IWorkloadDiscovery>(sp => new HangfireWorkloadDiscovery(sp.GetService<JobStorage>()));
+        return builder;
+    }
+
+    /// <summary>
     /// The workload the current job runs as, for recording items:
     /// add a <c>PerformContext? context = null</c> parameter to the job method and call <c>context.GetWorkload()?.Processed()</c>.
     /// </summary>

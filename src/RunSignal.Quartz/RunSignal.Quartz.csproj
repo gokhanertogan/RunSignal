@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+    <ProjectReference Include="..\RunSignal.DotNet\RunSignal.DotNet.csproj" />
   </ItemGroup>
 
 </Project>

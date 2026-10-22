@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace RunSignal;
 
@@ -9,10 +10,17 @@ public static class RunSignalServiceCollectionExtensions
 {
     /// <summary>
     /// Registers a singleton <see cref="WorkloadRegistry"/>. Add workloads with <see cref="RunSignalBuilder.AddWorkload"/>.
+    /// Once the application has started, workloads that have not run yet are discovered (see <see cref="IWorkloadDiscovery"/>)
+    /// and, if <see cref="RunSignalOptions.ManifestPath"/> is set, the workload manifest is written.
     /// </summary>
-    public static RunSignalBuilder AddRunSignal(this IServiceCollection services)
+    public static RunSignalBuilder AddRunSignal(this IServiceCollection services, Action<RunSignalOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<RunSignalOptions>();
+        if (configure is not null)
+            options.Configure(configure);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, RunSignalStartupService>());
 
         services.TryAddSingleton(sp =>
         {

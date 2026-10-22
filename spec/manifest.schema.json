@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gokhanertogan/RunSignal/spec/manifest.schema.json",
+  "title": "RunSignal workload manifest",
+  "description": "Every workload of a service and what it is expected to do. Produced by a RunSignal SDK from the running application; read by the RunSignal CLI to provision alerts.",
+  "type": "object",
+  "required": ["version", "service", "workloads"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "service": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The OpenTelemetry service.name the workloads' signals are exported with."
+    },
+    "workloads": {
+      "type": "array",
+      "description": "Sorted by name.",
+      "items": { "$ref": "#/$defs/workload" }
+    }
+  },
+  "$defs": {
+    "workload": {
+      "type": "object",
+      "required": ["name", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "schedule": {
+          "type": "string",
+          "description": "5-field Unix cron, or 6/7-field Quartz cron with seconds. Produces the missed alert."
+        },
+        "maxDurationSeconds": { "type": "number", "exclusiveMinimum": 0, "description": "Produces the overrun alert." },
+        "expectEverySeconds": { "type": "number", "exclusiveMinimum": 0, "description": "Produces the stalled alert." },
+        "minProcessed": { "type": "integer", "minimum": 1, "description": "Produces the low-output alert." },
+        "failureRateThreshold": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "Produces the failure-rate alert." },
+        "severity": { "enum": ["info", "warning", "critical"] }
+      }
+    }
+  }
+}
