@@ -8,7 +8,10 @@ language.
 
 - **Workload**: a unit of background work that no HTTP status code describes, such as a scheduled job, a queue
   consumer, a sync loop or a batch. It is identified by a stable, low-cardinality `name`
-  (`[a-z0-9][a-z0-9._-]*`, at most 128 characters), for example `nightly-invoice`.
+  (`[a-z0-9][a-z0-9._-]*`, at most 128 characters), for example `nightly-invoice`. SDKs that name workloads
+  after jobs derive the name the same way everywhere: strip diacritics, split camel case with `-`, lowercase,
+  replace other characters with `-`, and keep `.` and `_` (`InvoiceJobs.GenerateInvoices` becomes
+  `invoice-jobs.generate-invoices`).
 - **Run**: one execution of a workload. It ends with exactly one outcome.
 - **Item**: one unit of work inside a run, such as an invoice, a message or a row.
 - **Heartbeat**: a periodic "I am still alive and making progress" mark from a long-running loop.
@@ -65,7 +68,7 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 
 | Field | Meaning | Alert it produces |
 |---|---|---|
-| `schedule` | Cron expression for when the workload should run | `missed` |
+| `schedule` | Cron expression for when the workload should run: 5-field Unix cron, or 6/7-field Quartz cron with seconds | `missed` |
 | `maxDuration` | Longest acceptable run | `overrun` |
 | `expectEvery` | Longest acceptable gap between heartbeats | `stalled` |
 | `minProcessed` | Fewest items a run should process | `low-output` |

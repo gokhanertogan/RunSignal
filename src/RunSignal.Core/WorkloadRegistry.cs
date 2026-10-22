@@ -67,6 +67,80 @@ public sealed partial class WorkloadRegistry : IDisposable
         return created;
     }
 
+    /// <summary>
+    /// Returns the workload called <paramref name="name"/>, creating it with <paramref name="configure"/> if it
+    /// does not exist yet. Unlike <see cref="Get"/>, an existing workload is returned as is: options declared
+    /// elsewhere (for example with <c>AddWorkload</c>) take precedence. Integrations use this to name workloads
+    /// after jobs.
+    /// </summary>
+    public Workload GetOrAdd(string name, Action<WorkloadOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        if (_workloads.TryGetValue(name, out var existing))
+            return existing;
+
+        ValidateName(name);
+        var options = new WorkloadOptions();
+        configure(options);
+        return _workloads.GetOrAdd(name, new Workload(name, options, _instruments));
+    }
+
+    /// <summary>
+    /// Turns an arbitrary job identifier, such as <c>InvoiceJobs.GenerateInvoices</c> or <c>Reports/Daily Sales</c>,
+    /// into a valid workload name such as <c>invoice-jobs.generate-invoices</c> or <c>reports-daily-sales</c>.
+    /// </summary>
+    public static string ToWorkloadName(string identifier)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(identifier);
+        identifier = RemoveDiacritics(identifier);
+        var builder = new System.Text.StringBuilder(identifier.Length + 8);
+        for (var i = 0; i < identifier.Length; i++)
+        {
+            var c = identifier[i];
+            if (char.IsAsciiLetterUpper(c))
+            {
+                // Break camel case: "GenerateInvoices" -> "generate-invoices", "HTTPSync" -> "http-sync".
+                var previous = i > 0 ? identifier[i - 1] : '\0';
+                var next = i + 1 < identifier.Length ? identifier[i + 1] : '\0';
+                if (builder.Length > 0 && builder[^1] is not ('-' or '.' or '_') &&
+                    (char.IsAsciiLetterLower(previous) || char.IsAsciiDigit(previous) || (char.IsAsciiLetterUpper(previous) && char.IsAsciiLetterLower(next))))
+                    builder.Append('-');
+                builder.Append(char.ToLowerInvariant(c));
+            }
+            else if (char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c is '.' or '_')
+            {
+                builder.Append(c);
+            }
+            else if (builder.Length > 0 && builder[^1] != '-')
+            {
+                builder.Append('-');
+            }
+        }
+
+        var name = builder.ToString().Trim('-', '.', '_');
+        if (name.Length > 128)
+            name = name[..128].TrimEnd('-', '.', '_');
+        if (name.Length == 0)
+            throw new ArgumentException($"'{identifier}' contains no letters or digits to name a workload after.", nameof(identifier));
+        return name;
+    }
+
+    // "e-Arşiv gönderimi" -> "e-Arsiv gonderimi", so names stay readable instead of losing letters.
+    private static string RemoveDiacritics(string value)
+    {
+        if (System.Text.Ascii.IsValid(value))
+            return value;
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value.Normalize(System.Text.NormalizationForm.FormD))
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)
+                continue;
+            builder.Append(c switch { 'ı' => 'i', 'ß' => 's', 'ø' => 'o', 'Ø' => 'O', 'æ' => 'a', 'Æ' => 'A', 'đ' => 'd', 'Đ' => 'D', 'ł' => 'l', 'Ł' => 'L', _ => c });
+        }
+        return builder.ToString();
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

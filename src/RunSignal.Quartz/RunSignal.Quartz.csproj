@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>RunSignal.Quartz</RootNamespace>
+    <PackageId>RunSignal.Quartz</PackageId>
+    <Title>RunSignal.Quartz: monitor Quartz.NET jobs with RunSignal and OpenTelemetry</Title>
+    <Description>Records every Quartz.NET job execution as a RunSignal workload run (success, failure, cancellation and duration) with no code in your jobs. Cron trigger schedules are picked up for missed-run alerts.</Description>
+    <PackageTags>$(PackageTags);quartz-monitoring;scheduler</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Quartz" Version="3.13.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

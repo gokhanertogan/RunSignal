@@ -14,8 +14,8 @@ RunSignal records **runs, items and heartbeats** of background work as OpenTelem
 same names in every language. From them it provisions the alerts you need, sent to Teams or Slack:
 **missed**, **overrun**, **stalled**, **low-output** and **failure-rate**.
 
-> Status: early development. The .NET core (`RunSignal.Core`, `RunSignal.DotNet`, `RunSignal.OpenTelemetry`)
-> works; scheduler integrations, New Relic provisioning, the CLI and other languages are next.
+> Status: early development. The .NET packages (core, dependency injection, OpenTelemetry, Hangfire and
+> Quartz.NET) work; New Relic provisioning, the CLI and other languages are next.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why RunSignal
@@ -24,7 +24,7 @@ same names in every language. From them it provisions the alerts you need, sent 
   Datadog or any OTLP backend. There is no new SaaS to sign up for.
 - **Alerts as code.** Workload expectations (schedule, max duration, heartbeat interval, minimum output) live
   next to the code, and RunSignal provisions the matching alerts.
-- **Knows your scheduler.** Hangfire and Quartz integrations (planned) monitor jobs without hand-written ping code.
+- **Knows your scheduler.** Hangfire and Quartz.NET jobs are monitored without any code in the jobs, and their cron schedules become missed-run expectations.
 - **One model, many languages.** .NET, Java, Go, Node.js and Rust emit the same signals defined in
   [spec/README.md](spec/README.md), so one set of alert rules covers all of them.
 - **Built for hot paths.** Recording a run, an item or a heartbeat does not allocate.
@@ -46,7 +46,8 @@ same names in every language. From them it provisions the alerts you need, sent 
 | `RunSignal.Core` | Workloads, runs, items, heartbeats. No dependencies beyond the BCL | ✅ Working |
 | `RunSignal.DotNet` | `AddRunSignal()`, `AddWorkload()`, keyed injection | ✅ Working |
 | `RunSignal.OpenTelemetry` | `AddRunSignalInstrumentation()` for metrics and traces | ✅ Working |
-| `RunSignal.Hangfire` / `RunSignal.Quartz` | Automatic job instrumentation | Planned |
+| `RunSignal.Hangfire` | Monitors every Hangfire job (Hangfire 1.8+) | ✅ Working |
+| `RunSignal.Quartz` | Monitors every Quartz.NET job (Quartz 3.x; 4.x planned) | ✅ Working |
 | `RunSignal.NewRelic` / `RunSignal.Cli` | Alert provisioning (`runsignal diff` / `provision`) | Planned |
 | `RunSignal.Java` / `.Node` / `.Go` / `.Rust` | SDKs for other languages | Planned |
 
@@ -118,6 +119,55 @@ run.Succeed();
 ```
 
 Without dependency injection, use `WorkloadRegistry.Shared.Get("name")` once and keep the result.
+
+## Hangfire
+
+```csharp
+builder.Services.AddRunSignal();
+builder.Services.AddHangfire((sp, config) => config
+    .UseInMemoryStorage()          // your storage
+    .UseRunSignal(sp));            // every job run is now a workload run
+```
+
+That is all: success, failure (with the job's real exception type), cancellation on shutdown and duration are
+recorded for every job. Recurring jobs are named after their ID (`"Nightly Invoice"` becomes
+`nightly-invoice`), and their cron expression becomes the workload's schedule. Other jobs are named after their
+class and method (`InvoiceJobs.Generate` becomes `invoice-jobs.generate`).
+
+Name a job and set its expectations with `[Workload]`, and count items through `PerformContext`:
+
+```csharp
+[Workload("nightly-invoice", MaxDuration = "30m", MinProcessed = 100, Severity = Severity.Critical)]
+public async Task GenerateInvoices(PerformContext? context = null)
+{
+    foreach (var order in await _orders.GetUnbilledAsync())
+    {
+        await _invoices.CreateAsync(order);
+        context.GetWorkload()?.Processed();
+    }
+}
+```
+
+Durations accept `90s`, `30m`, `2h`, `1d` or `hh:mm:ss`. Options declared with `AddWorkload` for the same name
+take precedence over the attribute.
+
+## Quartz.NET
+
+```csharp
+builder.Services.AddRunSignal();
+builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>());
+```
+
+Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Shared)`.
+
+Jobs are named after their key (`reports.DailySales` becomes `reports.daily-sales`; the `DEFAULT` group is left
+out; a job scheduled without an identity, whose key is a random GUID, is named after its class), and a cron
+trigger's expression becomes the schedule. `[Workload]` works on the job class, and
+`context.GetWorkload()?.Processed()` counts items. Quartz.NET 4 changed its job and listener interfaces, so
+`RunSignal.Quartz` currently supports Quartz.NET 3.x.
+
+Workload names are derived readably from any identifier, including non-ASCII ones: `e-Arşiv gönderimi` becomes
+`e-arsiv-gonderimi`.
 
 A runnable example that prints the signals to the console is in
 [samples/RunSignal.Samples.Worker](samples/RunSignal.Samples.Worker): `dotnet run --project samples/RunSignal.Samples.Worker`.

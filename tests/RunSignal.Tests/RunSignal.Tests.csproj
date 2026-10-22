@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Hangfire.Core" Version="1.8.25" />
+    <PackageReference Include="Hangfire.InMemory" Version="1.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics" Version="10.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
@@ -23,6 +25,8 @@
     <ProjectReference Include="..\..\src\RunSignal.Core\RunSignal.Core.csproj" />
     <ProjectReference Include="..\..\src\RunSignal.DotNet\RunSignal.DotNet.csproj" />
     <ProjectReference Include="..\..\src\RunSignal.OpenTelemetry\RunSignal.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\..\src\RunSignal.Hangfire\RunSignal.Hangfire.csproj" />
+    <ProjectReference Include="..\..\src\RunSignal.Quartz\RunSignal.Quartz.csproj" />
   </ItemGroup>
 
 </Project>

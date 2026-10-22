@@ -32,10 +32,13 @@ path, no in-process rule evaluation).
 - `RunSignal.OpenTelemetry`: `AddRunSignalInstrumentation()` for metrics and traces, with duration buckets for jobs.
 - Tests on net8.0 and net10.0, benchmarks, and a sample worker.
 
-### Phase 2: Scheduler integrations (.NET)
-- `RunSignal.Hangfire`: a server filter that records every job run automatically; a `[Workload]` attribute; schedules read from recurring-job cron expressions.
-- `RunSignal.Quartz`: an `IJobListener` that does the same, with schedules read from triggers.
-- Item counting from job code through an injected context.
+### Phase 2: Scheduler integrations (.NET) ✅
+- `[Workload]` attribute in Core (name, schedule, durations such as `"30m"`, minimum output, failure rate, severity) and readable name derivation from any job identifier.
+- `RunSignal.Hangfire` (Hangfire 1.8+): a server filter that records every job run, unwraps Hangfire's exception wrapper, treats shutdown and aborted jobs as cancelled, and names recurring jobs after their ID with their cron as the schedule. Resolution is cached per job, so a run costs no reflection or extra storage access.
+- `RunSignal.Quartz` (Quartz.NET 3.x): a job listener that does the same, with schedules read from cron triggers.
+- Item counting from job code through `context.GetWorkload()`.
+- Integration tests against a real Hangfire server (in-memory storage) and a real Quartz scheduler.
+- Follow-up: Quartz.NET 4 support. Version 4 changed `IJob` and the listener interfaces to `ValueTask`, so it needs its own build (multi-targeted package or `RunSignal.Quartz4`).
 
 ### Phase 3: Workload manifest
 - A JSON manifest of every workload and its expectations, with a JSON Schema in `spec/`.

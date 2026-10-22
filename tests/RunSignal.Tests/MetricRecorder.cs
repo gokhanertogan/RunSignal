@@ -30,6 +30,20 @@ internal sealed class MetricRecorder : IDisposable
 
     public void CollectObservable() => _listener.RecordObservableInstruments();
 
+    /// <summary>Waits for the first measurement of <paramref name="instrument"/>, for work that runs on a scheduler's thread.</summary>
+    public async Task<RecordedMeasurement> WaitForAsync(string instrument, int timeoutSeconds = 15)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = _measurements.FirstOrDefault(m => m.Instrument == instrument);
+            if (found is not null)
+                return found;
+            await Task.Delay(25);
+        }
+        throw new TimeoutException($"No '{instrument}' measurement for workload '{_workload}' within {timeoutSeconds} s.");
+    }
+
     public void Dispose() => _listener.Dispose();
 
     private void Add(Instrument instrument, double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)

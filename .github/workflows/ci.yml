@@ -20,6 +20,8 @@ jobs:
           dotnet pack src/RunSignal.Core -c Release -o artifacts
           dotnet pack src/RunSignal.DotNet -c Release -o artifacts
           dotnet pack src/RunSignal.OpenTelemetry -c Release -o artifacts
+          dotnet pack src/RunSignal.Hangfire -c Release -o artifacts
+          dotnet pack src/RunSignal.Quartz -c Release -o artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: packages
