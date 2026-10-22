@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>RunSignal</RootNamespace>
+    <PackageId>RunSignal.DotNet</PackageId>
+    <Title>RunSignal.DotNet: dependency injection for RunSignal workloads</Title>
+    <Description>Registers RunSignal workloads with Microsoft.Extensions.DependencyInjection: AddRunSignal().AddWorkload("nightly-invoice", ...) and inject them with [FromKeyedServices]. Monitor background jobs, consumers and BackgroundService loops that no HTTP status code describes.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

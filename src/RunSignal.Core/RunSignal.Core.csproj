@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>RunSignal</RootNamespace>
+    <PackageId>RunSignal.Core</PackageId>
+    <Title>RunSignal.Core: workload signals for background jobs, consumers and batches</Title>
+    <Description>Zero-dependency core of RunSignal. Records runs, items and heartbeats of background work (scheduled jobs, queue consumers, sync loops) as OpenTelemetry-compatible metrics and spans, so you can alert on work that no HTTP status code describes: missed, overrunning, stalled or low-output jobs.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RunSignal.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>RunSignal</RootNamespace>
+    <PackageId>RunSignal.OpenTelemetry</PackageId>
+    <Title>RunSignal.OpenTelemetry: export workload signals with OpenTelemetry</Title>
+    <Description>Adds RunSignal's workload metrics and spans to the OpenTelemetry .NET SDK with one call, with histogram buckets sized for jobs that run from milliseconds to hours. Send them to New Relic, Grafana, Datadog or any OTLP backend.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" Version="1.15.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+  </ItemGroup>
+
+</Project>
