@@ -1,6 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Quartz;
+#if QUARTZ4
+using Quartz.Extensibility;
+#else
 using Quartz.Impl.Matchers;
+#endif
 
 namespace RunSignal.Quartz;
 
@@ -11,7 +15,7 @@ public static class RunSignalQuartzExtensions
     public static IScheduler UseRunSignal(this IScheduler scheduler, WorkloadRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
-        scheduler.ListenerManager.AddJobListener(new RunSignalJobListener(registry), GroupMatcher<JobKey>.AnyGroup());
+        scheduler.ListenerManager.AddJobListener(new RunSignalJobListener(registry), [GroupMatcher<JobKey>.AnyGroup()]);
         return scheduler;
     }
 
@@ -27,13 +31,17 @@ public static class RunSignalQuartzExtensions
 
     /// <summary>
     /// Registers every job of the application's Quartz.NET schedulers as a workload when the application starts,
-    /// so jobs that never fire are alerted on and appear in the manifest. Uses the <see cref="ISchedulerFactory"/>
-    /// from dependency injection. Jobs are still recorded only after <c>q.AddJobListener&lt;RunSignalJobListener&gt;()</c>.
+    /// so jobs that never fire are alerted on and appear in the manifest. Uses the schedulers registered with
+    /// dependency injection. Jobs are still recorded only after <c>q.AddJobListener&lt;RunSignalJobListener&gt;()</c>.
     /// </summary>
     public static RunSignalBuilder AddQuartz(this RunSignalBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+#if QUARTZ4
+        builder.Services.AddSingleton<IWorkloadDiscovery>(sp => new QuartzWorkloadDiscovery(sp.GetRequiredService<ISchedulerRepository>()));
+#else
         builder.Services.AddSingleton<IWorkloadDiscovery>(sp => new QuartzWorkloadDiscovery(sp.GetRequiredService<ISchedulerFactory>()));
+#endif
         return builder;
     }
 
@@ -41,6 +49,6 @@ public static class RunSignalQuartzExtensions
     public static Workload? GetWorkload(this IJobExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.Get(RunSignalJobListener.WorkloadKey) as Workload;
+        return RunSignalJobListener.CurrentWorkload(context);
     }
 }

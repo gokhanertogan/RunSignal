@@ -1,6 +1,11 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Quartz;
+#if QUARTZ4
+using ListenerTask = System.Threading.Tasks.ValueTask;
+#else
+using ListenerTask = System.Threading.Tasks.Task;
+#endif
 
 namespace RunSignal.Quartz;
 
@@ -18,8 +23,9 @@ namespace RunSignal.Quartz;
 /// </remarks>
 public sealed class RunSignalJobListener : IJobListener
 {
-    internal const string RunKey = "RunSignal.Run";
-    internal const string WorkloadKey = "RunSignal.Workload";
+    // Runs in progress, per scheduler and fire instance. Quartz 4 has no per-execution context storage, and every
+    // scheduler uses the instance ID "NON_CLUSTERED" by default, so the scheduler name keeps fire IDs apart.
+    private static readonly ConcurrentDictionary<string, (Workload Workload, WorkloadRun Run)> s_running = new();
 
     private readonly WorkloadRegistry _registry;
 
@@ -37,24 +43,24 @@ public sealed class RunSignalJobListener : IJobListener
     public string Name => "RunSignal";
 
     /// <inheritdoc />
-    public Task JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default)
+    public ListenerTask JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
         var workload = _workloads.GetOrAdd(context.JobDetail.Key, static (_, state) => Resolve(state.Registry, state.Context.JobDetail, state.Context.Trigger as ICronTrigger), (Registry: _registry, Context: context));
-        context.Put(WorkloadKey, workload);
-        context.Put(RunKey, workload.Start());
-        return Task.CompletedTask;
+        s_running[RunId(context)] = (workload, workload.Start());
+        return ListenerTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task JobWasExecuted(IJobExecutionContext context, JobExecutionException? jobException, CancellationToken cancellationToken = default)
+    public ListenerTask JobWasExecuted(IJobExecutionContext context, JobExecutionException? jobException, CancellationToken cancellationToken = default)
     {
-        if (context.Get(RunKey) is not WorkloadRun run)
-            return Task.CompletedTask;
+        if (!s_running.TryRemove(RunId(context), out var running))
+            return ListenerTask.CompletedTask;
+        var run = running.Run;
 
         if (jobException is null)
         {
             run.Succeed();
-            return Task.CompletedTask;
+            return ListenerTask.CompletedTask;
         }
 
         // Quartz wraps an exception thrown by the job in a SchedulerException inside a JobExecutionException
@@ -66,21 +72,31 @@ public sealed class RunSignalJobListener : IJobListener
             run.Cancel();
         else
             run.Fail(exception);
-        return Task.CompletedTask;
+        return ListenerTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public ListenerTask JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default)
+    {
+        s_running.TryRemove(RunId(context), out _);
+        return ListenerTask.CompletedTask;
+    }
+
+    internal static Workload? CurrentWorkload(IJobExecutionContext context) =>
+        s_running.TryGetValue(RunId(context), out var running) ? running.Workload : null;
+
+    private static string RunId(IJobExecutionContext context) => context.Scheduler.SchedulerName + "/" + context.FireInstanceId;
 
     // Shared with QuartzWorkloadDiscovery so a job gets the same workload whether it was discovered or ran first.
     internal static Workload Resolve(WorkloadRegistry registry, IJobDetail job, ICronTrigger? cronTrigger)
     {
         var key = job.Key;
-        var attribute = job.JobType.GetCustomAttribute<WorkloadAttribute>();
+        var (jobClass, className) = JobClass(job);
+        var attribute = jobClass?.GetCustomAttribute<WorkloadAttribute>();
 
         // Jobs scheduled without an identity get a random GUID key, which would create a new workload on every
         // start; name those after the job class instead.
-        var keyName = Guid.TryParse(key.Name, out _) ? job.JobType.Name : key.Name;
+        var keyName = Guid.TryParse(key.Name, out _) ? className : key.Name;
         var name = attribute?.Name
             ?? WorkloadRegistry.ToWorkloadName(key.Group == JobKey.DefaultGroup ? keyName : $"{key.Group}.{keyName}");
 
@@ -90,5 +106,17 @@ public sealed class RunSignalJobListener : IJobListener
             if (options.Schedule is null && cronTrigger?.CronExpressionString is { } cron)
                 options.Schedule = QuartzCron.ToStandard(cron);
         });
+    }
+
+    // Quartz 4 refers to job classes by name and resolves them on demand; Quartz 3 holds the Type.
+    private static (Type? Type, string Name) JobClass(IJobDetail job)
+    {
+#if QUARTZ4
+        // FullName may be assembly-qualified ("Shop.Jobs.SyncJob, Shop.Worker"): drop the assembly first.
+        var typeName = job.JobType.FullName.Split(',')[0].Trim();
+        return (job.JobType.TryResolve(out var type) ? type : null, typeName[(typeName.LastIndexOfAny(['.', '+']) + 1)..]);
+#else
+        return (job.JobType, job.JobType.Name);
+#endif
     }
 }

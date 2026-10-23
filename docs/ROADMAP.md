@@ -38,7 +38,10 @@ path, no in-process rule evaluation).
 - `RunSignal.Quartz` (Quartz.NET 3.x): a job listener that does the same, with schedules read from cron triggers.
 - Item counting from job code through `context.GetWorkload()`.
 - Integration tests against a real Hangfire server (in-memory storage) and a real Quartz scheduler.
-- Follow-up: Quartz.NET 4 support. Version 4 changed `IJob` and the listener interfaces to `ValueTask`, so it needs its own build (multi-targeted package or `RunSignal.Quartz4`).
+- Quartz.NET 4 ✅: `RunSignal.Quartz4` is the same sources built against Quartz 4.0 (`#if QUARTZ4`), for .NET 10.
+  - Quartz 4 removed per-execution context storage, so runs are tracked by scheduler name and fire instance ID. Quartz 3 now works the same way.
+  - Quartz 4 refers to job classes by name (`JobType`) and registers a factory per named scheduler, so discovery reads every scheduler from `ISchedulerRepository`.
+  - The package is tested against Quartz 4.6 in its own test project, including two schedulers whose fire IDs could collide.
 
 ### Phase 3: Workload manifest ✅
 - A JSON manifest of every workload and its expectations ([spec/manifest.schema.json](../spec/manifest.schema.json)), serialized with System.Text.Json source generation (AOT-friendly, no new dependency in Core).

@@ -1,5 +1,9 @@
 using Quartz;
+#if QUARTZ4
+using Quartz.Extensibility;
+#else
 using Quartz.Impl.Matchers;
+#endif
 
 namespace RunSignal.Quartz;
 
@@ -9,6 +13,24 @@ namespace RunSignal.Quartz;
 /// </summary>
 public sealed class QuartzWorkloadDiscovery : IWorkloadDiscovery
 {
+#if QUARTZ4
+    // Quartz 4 registers a factory per named scheduler; the repository holds every scheduler instance.
+    private readonly ISchedulerRepository _schedulers;
+
+    /// <summary>Discovers the jobs of every scheduler in <paramref name="schedulers"/>.</summary>
+    public QuartzWorkloadDiscovery(ISchedulerRepository schedulers)
+    {
+        ArgumentNullException.ThrowIfNull(schedulers);
+        _schedulers = schedulers;
+    }
+
+    /// <inheritdoc />
+    public async Task DiscoverAsync(WorkloadRegistry registry, CancellationToken cancellationToken)
+    {
+        foreach (var scheduler in _schedulers.LookupAll())
+            await DiscoverAsync(scheduler, registry, cancellationToken).ConfigureAwait(false);
+    }
+#else
     private readonly ISchedulerFactory _schedulerFactory;
 
     /// <summary>Discovers the jobs of every scheduler <paramref name="schedulerFactory"/> has created.</summary>
@@ -24,6 +46,7 @@ public sealed class QuartzWorkloadDiscovery : IWorkloadDiscovery
         foreach (var scheduler in await _schedulerFactory.GetAllSchedulers(cancellationToken).ConfigureAwait(false))
             await DiscoverAsync(scheduler, registry, cancellationToken).ConfigureAwait(false);
     }
+#endif
 
     internal static async Task DiscoverAsync(IScheduler scheduler, WorkloadRegistry registry, CancellationToken cancellationToken)
     {

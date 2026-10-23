@@ -49,7 +49,7 @@ same names in every language. From them it provisions the alerts you need, sent 
 | `RunSignal.DotNet` | `AddRunSignal()`, `AddWorkload()`, keyed injection | ✅ Working |
 | `RunSignal.OpenTelemetry` | `AddRunSignalInstrumentation()` for metrics and traces | ✅ Working |
 | `RunSignal.Hangfire` | Monitors every Hangfire job (Hangfire 1.8+) | ✅ Working |
-| `RunSignal.Quartz` | Monitors every Quartz.NET job (Quartz 3.x; 4.x planned) | ✅ Working |
+| `RunSignal.Quartz` / `RunSignal.Quartz4` | Monitors every Quartz.NET 3 / Quartz.NET 4 job | ✅ Working |
 | `RunSignal.NewRelic` | Plans and provisions New Relic alerts from a manifest | ✅ Working |
 | `RunSignal.Prometheus` | Prometheus alerting rules from a manifest | ✅ Working |
 | `RunSignal.Alerting` | Backend-neutral thresholds shared by the backends | ✅ Working |
@@ -164,6 +164,9 @@ take precedence over the attribute.
 ```csharp
 builder.Services.AddRunSignal().AddQuartz();     // discovers scheduled jobs at startup
 builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>());
+
+// Quartz.NET 4 (package RunSignal.Quartz4, .NET 10): listeners take matchers.
+builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>([GroupMatcher<JobKey>.AnyGroup()]));
 ```
 
 Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Shared)` and
@@ -172,8 +175,12 @@ Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Share
 Jobs are named after their key (`reports.DailySales` becomes `reports.daily-sales`; the `DEFAULT` group is left
 out; a job scheduled without an identity, whose key is a random GUID, is named after its class), and a cron
 trigger's expression becomes the schedule. `[Workload]` works on the job class, and
-`context.GetWorkload()?.Processed()` counts items. Quartz.NET 4 changed its job and listener interfaces, so
-`RunSignal.Quartz` currently supports Quartz.NET 3.x.
+`context.GetWorkload()?.Processed()` counts items.
+
+Quartz.NET 4 changed its job and listener interfaces to `ValueTask` and supports only .NET 10, so it has its own
+package, `RunSignal.Quartz4`. It is built from the same sources and uses the same namespace, so moving from
+Quartz 3 to 4 only changes the package reference. It works with Quartz 4.0 and later, and is tested against 4.6,
+including named schedulers.
 
 Workload names are derived readably from any identifier, including non-ASCII ones: `e-Arşiv gönderimi` becomes
 `e-arsiv-gonderimi`.

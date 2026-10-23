@@ -26,6 +26,7 @@ jobs:
           dotnet pack src/RunSignal.OpenTelemetry -c Release -o artifacts
           dotnet pack src/RunSignal.Hangfire -c Release -o artifacts
           dotnet pack src/RunSignal.Quartz -c Release -o artifacts
+          dotnet pack src/RunSignal.Quartz4 -c Release -o artifacts
           dotnet pack src/RunSignal.Alerting -c Release -o artifacts
           dotnet pack src/RunSignal.NewRelic -c Release -o artifacts
           dotnet pack src/RunSignal.Prometheus -c Release -o artifacts
