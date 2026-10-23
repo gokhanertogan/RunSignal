@@ -1,0 +1,20 @@
+[package]
+name = "runsignal"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+description = "Monitor Rust background work that no HTTP status code describes (scheduled jobs, consumers, pipelines) with OpenTelemetry, and alert on missed, overrunning, stalled or low-output jobs."
+license = "MIT"
+repository = "https://github.com/gokhanertogan/RunSignal"
+keywords = ["observability", "opentelemetry", "monitoring", "cron", "alerting"]
+categories = ["development-tools::debugging"]
+
+[dependencies]
+opentelemetry = { version = "0.33.1", default-features = false, features = ["metrics", "trace"] }
+unicode-normalization = "0.1.26"
+
+[dev-dependencies]
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "metrics", "reqwest-blocking-client", "reqwest-rustls"] }
+opentelemetry_sdk = { version = "0.33.1", features = ["metrics", "trace", "testing"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt", "macros", "time"] }

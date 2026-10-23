@@ -73,3 +73,17 @@ jobs:
           distribution: temurin
           java-version: 21
       - run: mvn -B install -Dspring-boot.version=${{ matrix.spring-boot }}
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RunSignal.Rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test

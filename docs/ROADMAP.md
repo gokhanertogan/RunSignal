@@ -90,7 +90,15 @@ agreement; the first ones cover workload naming.
    - Verified live: the .NET CLI provisioned its alerts unchanged.
    - Lazy `GlobalOpenTelemetry` resolution avoids fixing the global instance to a no-op before the agent starts.
    - Follow-up: Spring Batch.
-4. **Rust**: `tokio` helpers.
+4. **Rust** ✅ ([src/RunSignal.Rust](../src/RunSignal.Rust), `runsignal` crate):
+   - Depends only on the `opentelemetry` API and `unicode-normalization`.
+   - `run` and `run_async`; a dropped future records a cancelled run.
+   - Runs are ended by value, so a run cannot be recorded twice.
+   - Verified live: the .NET CLI provisioned its alerts unchanged.
+   - Found on the way: `std::any::type_name` changed between Rust versions (`std::io::Error` is now `core::io::error::Error`), so `error.type` from type names is documented as unstable, and `fail_code` is the stable alternative.
+   - Follow-up: a `tokio-cron-scheduler` integration.
+
+All five SDKs are now live-verified against New Relic, each provisioned by the same CLI from its own manifest.
 
 Still to do: extend the conformance suite beyond names, by running the same scenarios against every SDK and comparing the exported OTLP with golden files.
 
