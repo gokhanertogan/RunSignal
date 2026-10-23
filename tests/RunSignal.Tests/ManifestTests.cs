@@ -10,6 +10,7 @@ using RunSignal.Quartz;
 
 namespace RunSignal.Tests;
 
+[Collection(QuartzIsolation.Name)]
 public class ManifestTests
 {
     [Fact]
@@ -65,6 +66,7 @@ public class ManifestTests
     [Fact]
     public async Task Host_discovers_unrun_jobs_and_writes_the_manifest_on_startup()
     {
+        QuartzIsolation.ResetLogging();
         var path = Path.Combine(Path.GetTempPath(), $"runsignal-{Guid.NewGuid():N}", "manifest.json");
         using var hangfireStorage = new InMemoryStorage();
         new RecurringJobManager(hangfireStorage).AddOrUpdate("Supplier Price Sync", Job.FromExpression(() => HangfireJobs.Succeeds()), "0 6 * * *");
