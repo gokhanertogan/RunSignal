@@ -51,7 +51,9 @@ same names in every language. From them it provisions the alerts you need, sent 
 | `RunSignal.Hangfire` | Monitors every Hangfire job (Hangfire 1.8+) | ✅ Working |
 | `RunSignal.Quartz` | Monitors every Quartz.NET job (Quartz 3.x; 4.x planned) | ✅ Working |
 | `RunSignal.NewRelic` | Plans and provisions New Relic alerts from a manifest | ✅ Working |
-| `RunSignal.Cli` | The `runsignal` tool: `plan`, `diff`, `provision` | ✅ Working |
+| `RunSignal.Prometheus` | Prometheus alerting rules from a manifest | ✅ Working |
+| `RunSignal.Alerting` | Backend-neutral thresholds shared by the backends | ✅ Working |
+| `RunSignal.Cli` | The `runsignal` tool: `plan`, `diff`, `provision`, `destroy`, `export prometheus` | ✅ Working |
 | [`RunSignal.Go`](src/RunSignal.Go) | Go SDK with robfig/cron integration | ✅ Working |
 | [`RunSignal.Node`](src/RunSignal.Node) (`@runsignal/node`) | Node.js SDK with BullMQ integration | ✅ Working |
 | [`RunSignal.Java`](src/RunSignal.Java) | Java SDK and a Spring Boot starter for `@Scheduled` | ✅ Working |
@@ -305,6 +307,30 @@ them a channel.
 
 Schedules are read in UTC unless you pass `--time-zone Europe/Istanbul`. Tune the grace and the reporting
 timeout with `--missed-grace` and `--not-reporting-after` (minutes).
+
+To remove everything RunSignal created for a service, run
+`runsignal destroy --service billing-service --account-id 1234567 [--dry-run]`. It deletes the workflows and
+the conditions RunSignal created, and deletes the policies once they are empty. Conditions you added by hand,
+and the policies that hold them, are kept, and notification channels are never deleted.
+
+## Prometheus and Grafana
+
+Prometheus 3 receives OpenTelemetry metrics directly (`--web.enable-otlp-receiver`). Point the exporter at
+`http://prometheus:9090/api/v1/otlp/v1/metrics` and keep the default cumulative temporality. Then generate
+alerting rules from the same manifests:
+
+```bash
+runsignal export prometheus billing.json payments.json -o runsignal-rules.yml
+```
+
+Load the file as a Prometheus rule file, or into Grafana Mimir or any Prometheus-compatible ruler. Alertmanager
+routes on the `severity` and `runsignal_alert` labels. The rules use the names Prometheus gives OTLP metrics by
+default: `runsignal_workload_runs_total`, `job` for `service.name`, and so on. They alert on the same conditions
+as New Relic, plus `RunSignalNotReporting` when a workload has reported nothing at all. That also covers a
+workload that is expected but never started. Overrun limits are rounded up to a histogram bucket.
+
+The rules are checked with `promtool test rules` ([tests/prometheus](tests/prometheus)) on series shaped like
+real OTLP data. The tests include the first failure of a job, whose counter series did not exist before.
 
 ## Building
 

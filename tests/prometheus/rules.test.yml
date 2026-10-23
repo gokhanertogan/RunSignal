@@ -1,0 +1,140 @@
+# promtool test rules tests/prometheus/rules.test.yml
+# Proves when each generated rule fires, on series shaped like what Prometheus stores for OTLP metrics.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The failure counter series is created by the first failure, so increase() alone would never see it.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_runs_total{job="billing", runsignal_workload="nightly-invoice", runsignal_outcome="failure", error_type="System.TimeoutException", instance="a"}'
+        values: '_ _ _ 1 1 1 1 1 1 1 1 1'
+      - series: 'runsignal_workload_runs_total{job="billing", runsignal_workload="nightly-invoice", runsignal_outcome="success", instance="a"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RunSignalFailed
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: RunSignalFailed
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: failed }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: failed'
+              description: 'A run of nightly-invoice failed.'
+      # Five minutes without a new failure: resolved.
+      - eval_time: 10m
+        alertname: RunSignalFailed
+        exp_alerts: []
+
+  # Missed: a day between runs plus the 30-minute max duration as grace is 88200 seconds.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_since_success_seconds{job="billing", runsignal_workload="nightly-invoice", instance="a"}'
+        values: '88100 88300 88360 88420'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: RunSignalMissed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RunSignalMissed
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: missed }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: missed'
+              description: 'nightly-invoice has not succeeded for longer than its schedule (0 2 * * *) allows: 1d between runs plus 30m grace.'
+
+  # Not reporting: the process stopped sending anything.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_since_success_seconds{job="billing", runsignal_workload="nightly-invoice", instance="a"}'
+        values: '10 70 130 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _'
+      # stock-sync keeps reporting, so only the silent workload alerts.
+      - series: 'runsignal_workload_since_heartbeat_seconds{job="billing", runsignal_workload="stock-sync", instance="b"}'
+        values: '0+2x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RunSignalNotReporting
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: RunSignalNotReporting
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: not-reporting }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: not-reporting'
+              description: 'nightly-invoice has reported nothing for 15m: the service is down or not exporting.'
+
+  # Overrun: the 30-minute limit falls on the 1800 bucket.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_duration_seconds_bucket{job="billing", runsignal_workload="nightly-invoice", le="1800", instance="a"}'
+        values: '1 1 1 1'
+      - series: 'runsignal_workload_duration_seconds_bucket{job="billing", runsignal_workload="nightly-invoice", le="+Inf", instance="a"}'
+        values: '1 1 2 2'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RunSignalOverrun
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: RunSignalOverrun
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: overrun }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: overrun'
+              description: 'A run of nightly-invoice took longer than 30m (limit 30m, rounded up to a histogram bucket).'
+
+  # Low output: 50 items over 2 successful runs is 25 per run, below 100.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_items_total{job="billing", runsignal_workload="nightly-invoice", runsignal_item_result="processed", instance="a"}'
+        values: '0 0 50 50'
+      - series: 'runsignal_workload_runs_total{job="billing", runsignal_workload="nightly-invoice", runsignal_outcome="success", instance="a"}'
+        values: '0 0 2 2'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RunSignalLowOutput
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: low-output }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: low-output'
+              description: 'Successful runs of nightly-invoice processed fewer than 100 items on average in the last hour.'
+
+  # Stalled: no heartbeat for more than five minutes.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_since_heartbeat_seconds{job="billing", runsignal_workload="stock-sync", instance="a"}'
+        values: '200 320 380 440'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: RunSignalStalled
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RunSignalStalled
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: stock-sync, severity: warning, runsignal_alert: stalled }
+            exp_annotations:
+              summary: 'billing/stock-sync: stalled'
+              description: 'stock-sync has not sent a heartbeat for longer than 5m.'
+
+  # Failure rate: half of the runs failed, above 20%; a healthy loop does not alert.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_runs_total{job="billing", runsignal_workload="stock-sync", runsignal_outcome="failure", error_type="x", instance="a"}'
+        values: '0 5 10 15'
+      - series: 'runsignal_workload_runs_total{job="billing", runsignal_workload="stock-sync", runsignal_outcome="success", instance="a"}'
+        values: '0 5 10 15'
+      - series: 'runsignal_workload_items_total{job="billing", runsignal_workload="stock-sync", runsignal_item_result="processed", instance="a"}'
+        values: '0 100 200 300'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RunSignalFailureRate
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: stock-sync, severity: warning, runsignal_alert: failure-rate }
+            exp_annotations:
+              summary: 'billing/stock-sync: failure-rate'
+              description: 'More than 20% of the runs of stock-sync failed in the last 15 minutes.'
+      - eval_time: 3m
+        alertname: RunSignalItemFailureRate
+        exp_alerts: []

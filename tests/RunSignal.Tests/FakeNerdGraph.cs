@@ -90,6 +90,24 @@ internal sealed class FakeNerdGraph : HttpMessageHandler
             return new JsonObject { ["alertsConditionDelete"] = new JsonObject { ["id"] = id } };
         }
 
+        if (query.Contains("alertsPolicyDelete"))
+        {
+            var id = v["id"]!.GetValue<string>();
+            Operations.Add("delete policy " + Policies[id]);
+            Policies.Remove(id);
+            return new JsonObject { ["alertsPolicyDelete"] = new JsonObject { ["id"] = id } };
+        }
+
+        if (query.Contains("aiWorkflowsDeleteWorkflow"))
+        {
+            var id = v["id"]!.GetValue<string>();
+            if (!query.Contains("deleteChannels: false"))
+                throw new InvalidOperationException("RunSignal must never delete notification channels.");
+            Operations.Add("delete workflow " + Workflows[id]["name"]);
+            Workflows.Remove(id);
+            return new JsonObject { ["aiWorkflowsDeleteWorkflow"] = new JsonObject { ["id"] = id, ["errors"] = new JsonArray() } };
+        }
+
         if (query.Contains("aiWorkflowsCreateWorkflow"))
         {
             var input = v["workflow"]!.AsObject();

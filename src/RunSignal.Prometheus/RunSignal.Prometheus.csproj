@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RunSignal.Prometheus</PackageId>
+    <Title>RunSignal.Prometheus: Prometheus alerting rules for background jobs from a RunSignal manifest</Title>
+    <Description>Turns RunSignal workload manifests into Prometheus alerting rules (missed, failed, stalled, overrun, low-output, failure-rate and not-reporting) for Prometheus, Grafana Mimir or any Prometheus-compatible ruler, using the metric names Prometheus gives OpenTelemetry metrics.</Description>
+    <PackageTags>$(PackageTags);prometheus;promql;grafana;alerting-rules</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Alerting\RunSignal.Alerting.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -8,11 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Cronos" Version="0.11.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+    <ProjectReference Include="..\RunSignal.Alerting\RunSignal.Alerting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

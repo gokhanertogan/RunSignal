@@ -1,4 +1,4 @@
-using RunSignal.NewRelic;
+using RunSignal.Alerting;
 
 namespace RunSignal.Tests;
 

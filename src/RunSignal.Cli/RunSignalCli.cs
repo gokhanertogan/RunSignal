@@ -75,7 +75,76 @@ internal static class RunSignalCli
         };
         provision.SetAction(Guarded((result, ct) => ProvisionAsync(result, dryRun: false, ct)));
 
-        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision };
+        var services = new Option<string[]>("--service")
+        {
+            Description = "A service whose RunSignal alerts to remove. Repeatable.",
+            Required = true,
+        };
+        var dryRun = new Option<bool>("--dry-run") { Description = "Show what would be removed without removing it." };
+        var destroy = new Command("destroy", "Remove the New Relic policies, conditions and workflows RunSignal created for a service. Conditions added by hand and notification channels are kept.")
+        {
+            services, accountId, region, apiKey, dryRun,
+        };
+        destroy.SetAction(Guarded(async (result, ct) =>
+        {
+            var key = result.GetValue(apiKey) ?? Environment.GetEnvironmentVariable(ApiKeyVariable);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                await error.WriteLineAsync($"error: pass --api-key or set {ApiKeyVariable} to a New Relic User API key.").ConfigureAwait(false);
+                return 1;
+            }
+            using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+            var provisioner = new NewRelicProvisioner(new NerdGraphClient(http, key, result.GetValue(region)), result.GetValue(accountId));
+            var isDryRun = result.GetValue(dryRun);
+            var removed = 0;
+            foreach (var service in result.GetValue(services)!)
+            {
+                var changes = await provisioner.DestroyAsync(service, isDryRun, ct).ConfigureAwait(false);
+                await output.WriteLineAsync($"{service}:").ConfigureAwait(false);
+                if (changes.Count == 0)
+                    await output.WriteLineAsync("  nothing to remove").ConfigureAwait(false);
+                foreach (var change in changes)
+                    await output.WriteLineAsync($"  {Symbol(change.Kind)} {change.Resource} {change.Name}").ConfigureAwait(false);
+                removed += changes.Count(c => c.Kind == ChangeKind.Delete);
+            }
+            await output.WriteLineAsync($"{removed} {(removed == 1 ? "resource" : "resources")} {(isDryRun ? "to remove" : "removed")}.").ConfigureAwait(false);
+            return 0;
+        }));
+
+        var outputFile = new Option<FileInfo?>("--output", "-o") { Description = "Write the rules to this file instead of standard output." };
+        var prometheus = new Command("prometheus", "Write Prometheus alerting rules for the manifests, for Prometheus, Grafana Mimir or any Prometheus-compatible ruler.")
+        {
+            manifests, outputFile, grace, notReporting, timeZone,
+        };
+        prometheus.SetAction(Guarded(async (result, ct) =>
+        {
+            var options = new RunSignal.Alerting.AlertOptions
+            {
+                MissedGrace = TimeSpan.FromMinutes(result.GetValue(grace)),
+                NotReportingAfter = TimeSpan.FromMinutes(result.GetValue(notReporting)),
+                ScheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(result.GetValue(timeZone)!),
+            };
+            var loaded = new List<WorkloadManifest>();
+            foreach (var manifestFile in result.GetValue(manifests)!)
+                loaded.Add(WorkloadManifest.FromJson(await File.ReadAllTextAsync(manifestFile.FullName, ct).ConfigureAwait(false)));
+
+            var rules = RunSignal.Prometheus.PrometheusRules.Generate(loaded, options, out var warnings);
+            foreach (var warning in warnings)
+                await error.WriteLineAsync("warning: " + warning).ConfigureAwait(false);
+            if (result.GetValue(outputFile) is { } file)
+            {
+                await File.WriteAllTextAsync(file.FullName, rules, ct).ConfigureAwait(false);
+                await output.WriteLineAsync($"Wrote Prometheus rules for {loaded.Sum(m => m.Workloads.Count)} workloads to {file.FullName}.").ConfigureAwait(false);
+            }
+            else
+            {
+                await output.WriteAsync(rules).ConfigureAwait(false);
+            }
+            return 0;
+        }));
+        var export = new Command("export", "Write alert rules for backends RunSignal does not provision directly.") { prometheus };
+
+        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision, destroy, export };
         return await root.Parse(args).InvokeAsync().ConfigureAwait(false);
 
         // Expected failures (a missing file, a bad cron, an API error) print one line instead of a stack trace.

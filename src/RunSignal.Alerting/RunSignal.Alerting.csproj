@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RunSignal.Alerting</PackageId>
+    <Title>RunSignal.Alerting: backend-neutral alert thresholds for RunSignal manifests</Title>
+    <Description>Reads RunSignal workload manifests and computes when each alert should fire (missed runs from cron schedules, stalled heartbeats, overruns, low output, failure rates), shared by the New Relic and Prometheus backends so every backend alerts at the same moment.</Description>
+    <PackageTags>$(PackageTags);cron;alerts-as-code</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RunSignal.Core\RunSignal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

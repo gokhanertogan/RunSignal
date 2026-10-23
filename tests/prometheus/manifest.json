@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "service": "billing",
+  "workloads": [
+    {
+      "name": "nightly-invoice",
+      "schedule": "0 2 * * *",
+      "maxDurationSeconds": 1800,
+      "minProcessed": 100,
+      "severity": "critical"
+    },
+    {
+      "name": "stock-sync",
+      "expectEverySeconds": 300,
+      "failureRateThreshold": 0.2,
+      "severity": "warning"
+    }
+  ]
+}

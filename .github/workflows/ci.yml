@@ -16,13 +16,19 @@ jobs:
             8.0.x
             10.0.x
       - run: dotnet test -c Release
+      - name: Check the Prometheus rules with promtool
+        run: |
+          curl -sL https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.linux-amd64.tar.gz | tar xz
+          prometheus-3.15.1.linux-amd64/promtool test rules tests/prometheus/rules.test.yml
       - run: |
           dotnet pack src/RunSignal.Core -c Release -o artifacts
           dotnet pack src/RunSignal.DotNet -c Release -o artifacts
           dotnet pack src/RunSignal.OpenTelemetry -c Release -o artifacts
           dotnet pack src/RunSignal.Hangfire -c Release -o artifacts
           dotnet pack src/RunSignal.Quartz -c Release -o artifacts
+          dotnet pack src/RunSignal.Alerting -c Release -o artifacts
           dotnet pack src/RunSignal.NewRelic -c Release -o artifacts
+          dotnet pack src/RunSignal.Prometheus -c Release -o artifacts
           dotnet pack src/RunSignal.Cli -c Release -o artifacts
       - uses: actions/upload-artifact@v4
         with:

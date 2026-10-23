@@ -1,4 +1,5 @@
 using System.Globalization;
+using RunSignal.Alerting;
 using static RunSignal.RunSignalTelemetry;
 
 namespace RunSignal.NewRelic;
@@ -32,9 +33,7 @@ public static class AlertPlanner
             {
                 try
                 {
-                    var interval = CronSchedule.MaxInterval(schedule, options.ScheduleTimeZone, options.Now);
-                    var grace = workload.MaxDurationSeconds is { } max ? TimeSpan.FromSeconds(max) : options.MissedGrace;
-                    var limit = interval + grace;
+                    var (interval, grace) = MissedThreshold.For(workload, options.ToAlertOptions())!;
                     conditions.Add(new AlertCondition
                     {
                         Name = $"{workload.Name}: missed",
@@ -43,7 +42,7 @@ public static class AlertPlanner
                         Description = $"{ManagedMarker} {workload.Name} has not succeeded for longer than its schedule ({schedule}) allows: {Format(interval)} between runs plus {Format(grace)} grace. Also opens when the service stops reporting for {Format(TimeSpan.FromSeconds(notReporting))}.",
                         Nrql = $"SELECT max({Instruments.SinceSuccess}) FROM Metric WHERE {where}",
                         Above = true,
-                        Threshold = Math.Round(limit.TotalSeconds),
+                        Threshold = Math.Round((interval + grace).TotalSeconds),
                         AggregationWindowSeconds = 60,
                         AggregationMethod = AggregationMethod.EventFlow,
                         LossOfSignalSeconds = notReporting,
@@ -125,7 +124,7 @@ public static class AlertPlanner
 
             if (workload.FailureRateThreshold is { } rate)
             {
-                var percent = rate.ToString("P0", CultureInfo.InvariantCulture);
+                var percent = (rate * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%";
                 conditions.Add(new AlertCondition
                 {
                     Name = $"{workload.Name}: failure rate",
@@ -171,9 +170,5 @@ public static class AlertPlanner
     // NRQL string literal. Workload names cannot contain quotes, but service names can.
     private static string Quote(string value) => "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
-    private static string Format(TimeSpan span) =>
-        span.TotalDays >= 1 && span.TotalHours % 24 == 0 ? $"{span.TotalDays:0.#}d"
-        : span.TotalHours >= 1 ? $"{span.TotalHours:0.#}h"
-        : span.TotalMinutes >= 1 ? $"{span.TotalMinutes:0.#}m"
-        : $"{span.TotalSeconds:0.#}s";
+    private static string Format(TimeSpan span) => DurationText.Format(span);
 }

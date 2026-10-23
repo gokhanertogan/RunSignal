@@ -84,21 +84,26 @@ public sealed record AlertPolicyPlan(string Name, Severity Severity, IReadOnlyLi
 /// <param name="Warnings">Workloads or expectations that produced no condition, and why.</param>
 public sealed record AlertPlan(string Service, IReadOnlyList<AlertPolicyPlan> Policies, IReadOnlyList<string> Warnings);
 
-/// <summary>Tuning for <see cref="AlertPlanner.Plan"/>.</summary>
+/// <summary>Tuning for <see cref="AlertPlanner.Plan"/>; shared with the other alert backends.</summary>
 public sealed class AlertPlanOptions
 {
-    /// <summary>
-    /// Extra time a scheduled workload gets, on top of the longest gap in its schedule, before it counts as missed.
-    /// A workload's <see cref="WorkloadOptions.MaxDuration"/> is used instead when it is set. Defaults to 15 minutes.
-    /// </summary>
+    /// <inheritdoc cref="RunSignal.Alerting.AlertOptions.MissedGrace"/>
     public TimeSpan MissedGrace { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>How long a workload may report nothing at all before an incident opens. Defaults to 15 minutes.</summary>
     public TimeSpan NotReportingAfter { get; set; } = TimeSpan.FromMinutes(15);
 
-    /// <summary>The time zone cron schedules are evaluated in. Defaults to UTC.</summary>
+    /// <inheritdoc cref="RunSignal.Alerting.AlertOptions.ScheduleTimeZone"/>
     public TimeZoneInfo ScheduleTimeZone { get; set; } = TimeZoneInfo.Utc;
 
-    /// <summary>When to start reading schedules from. Defaults to now; set it for repeatable plans in tests.</summary>
+    /// <inheritdoc cref="RunSignal.Alerting.AlertOptions.Now"/>
     public DateTimeOffset? Now { get; set; }
+
+    internal RunSignal.Alerting.AlertOptions ToAlertOptions() => new()
+    {
+        MissedGrace = MissedGrace,
+        NotReportingAfter = NotReportingAfter,
+        ScheduleTimeZone = ScheduleTimeZone,
+        Now = Now,
+    };
 }

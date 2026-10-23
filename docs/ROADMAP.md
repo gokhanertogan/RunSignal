@@ -102,20 +102,18 @@ All five SDKs are now live-verified against New Relic, each provisioned by the s
 
 Still to do: extend the conformance suite beyond names, by running the same scenarios against every SDK and comparing the exported OTLP with golden files.
 
-### Phase 6: Notifications end to end (deferred to last)
+### Phase 6: More backends
+- **Prometheus / Grafana** ✅:
+  - `runsignal export prometheus` writes alerting rules for Prometheus, Grafana Mimir or any Prometheus-compatible ruler.
+  - Thresholds come from the shared `RunSignal.Alerting` package, so they match New Relic.
+  - Verified against a local Prometheus 3.15 with its OTLP receiver: the metric names were taken from real OTLP ingestion, all rules evaluated healthy, `RunSignalFailed` fired on live failures, and `RunSignalNotReporting` fired when the process stopped.
+  - `promtool test rules` covers every rule, including the first failure of a job, which `increase()` alone misses because the counter series is created by that failure.
+- **Datadog monitors**: next. It needs a Datadog account to verify against.
+
+### Phase 7: Notifications end to end (last)
 - Create notification channels from an existing Teams/Slack destination ID. The New Relic UI only creates channels inside workflows and does not show their IDs, so `--channel <id>` is awkward.
 - Verify a real Teams and Slack notification arriving from a RunSignal workflow.
 
-### Phase 7: More backends
-- Prometheus / Grafana alert rules and Datadog monitors from the same manifest.
+### Also done
+- `runsignal destroy` removes what RunSignal created for a service, keeps conditions added by hand and never deletes notification channels. Verified live by cleaning up the five sample services.
 
-## Decisions
-
-- **Notifications go through the backend.** RunSignal provisions alerts and their Teams/Slack destinations in the
-  observability backend (New Relic first); it does not send notifications itself. Only the backend can notice
-  that a dead process has stopped sending signals. Direct notifications for teams without a backend may come
-  later as a separate service (for example `RunSignal.Server`), not inside the SDKs.
-
-## Open decisions
-
-- **Package names.** Do the language SDKs keep the `RunSignal.<Language>` names, or use each ecosystem's conventions (`github.com/.../runsignal-go`, `@runsignal/node`, `io.runsignal`)?

@@ -122,6 +122,77 @@ public sealed class NewRelicProvisioner
         return changes;
     }
 
+    /// <summary>
+    /// Removes what RunSignal provisioned for <paramref name="service"/>: its workflows, the conditions it created,
+    /// and its policies once they hold no other conditions. Conditions added by hand are kept, and so is the policy
+    /// that holds them. Notification channels are never deleted.
+    /// </summary>
+    public async Task<IReadOnlyList<Change>> DestroyAsync(string service, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(service);
+        var changes = new List<Change>();
+        foreach (var severity in Enum.GetValues<Severity>())
+        {
+            var name = AlertPlanner.PolicyName(service, severity);
+            var policyId = await FindPolicyIdAsync(name, cancellationToken).ConfigureAwait(false);
+            if (policyId is null)
+                continue;
+
+            if (await FindWorkflowAsync(name, cancellationToken).ConfigureAwait(false) is { } workflow)
+            {
+                changes.Add(new Change(ChangeKind.Delete, "workflow", name));
+                if (!dryRun)
+                    await DeleteWorkflowAsync(workflow.GetProperty("id").GetString()!, cancellationToken).ConfigureAwait(false);
+            }
+
+            var kept = 0;
+            foreach (var (conditionName, current) in await ListConditionsAsync(policyId, cancellationToken).ConfigureAwait(false))
+            {
+                if (!IsManaged(current.Json))
+                {
+                    kept++;
+                    continue;
+                }
+                changes.Add(new Change(ChangeKind.Delete, "condition", conditionName));
+                if (!dryRun)
+                    await DeleteConditionAsync(current.Id, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (kept > 0)
+            {
+                changes.Add(new Change(ChangeKind.Unchanged, "policy", $"{name} (kept: it has {kept} condition(s) RunSignal did not create)"));
+                continue;
+            }
+            changes.Add(new Change(ChangeKind.Delete, "policy", name));
+            if (!dryRun)
+                await DeletePolicyAsync(policyId, cancellationToken).ConfigureAwait(false);
+        }
+        return changes;
+    }
+
+    private Task DeletePolicyAsync(string id, CancellationToken cancellationToken)
+    {
+        const string mutation = """
+            mutation($accountId: Int!, $id: ID!) {
+              alertsPolicyDelete(accountId: $accountId, id: $id) { id }
+            }
+            """;
+        return _client.ExecuteAsync(mutation, new JsonObject { ["accountId"] = _accountId, ["id"] = id }, cancellationToken);
+    }
+
+    private Task DeleteWorkflowAsync(string id, CancellationToken cancellationToken)
+    {
+        const string mutation = """
+            mutation($accountId: Int!, $id: ID!) {
+              aiWorkflowsDeleteWorkflow(accountId: $accountId, deleteChannels: false, id: $id) {
+                id
+                errors { description type }
+              }
+            }
+            """;
+        return ExecuteWorkflowMutationAsync(mutation, "aiWorkflowsDeleteWorkflow", new JsonObject { ["accountId"] = _accountId, ["id"] = id }, cancellationToken);
+    }
+
     private async Task<string?> FindPolicyIdAsync(string name, CancellationToken cancellationToken)
     {
         const string query = """
@@ -247,7 +318,7 @@ public sealed class NewRelicProvisioner
         return _client.ExecuteAsync(mutation, new JsonObject { ["accountId"] = _accountId, ["id"] = id }, cancellationToken);
     }
 
-    private async Task<Change> ProvisionWorkflowAsync(string name, string? policyId, IReadOnlyList<string> channelIds, bool dryRun, CancellationToken cancellationToken)
+    private async Task<JsonElement?> FindWorkflowAsync(string name, CancellationToken cancellationToken)
     {
         const string search = """
             query($accountId: Int!, $filters: AiWorkflowsFilters) {
@@ -267,9 +338,18 @@ public sealed class NewRelicProvisioner
             ["accountId"] = _accountId,
             ["filters"] = new JsonObject { ["name"] = name },
         }, cancellationToken).ConfigureAwait(false);
-        var existing = data.GetProperty("actor").GetProperty("account").GetProperty("aiWorkflows").GetProperty("workflows").GetProperty("entities")
-            .EnumerateArray()
-            .FirstOrDefault(w => w.GetProperty("name").GetString() == name);
+        foreach (var workflow in data.GetProperty("actor").GetProperty("account").GetProperty("aiWorkflows").GetProperty("workflows").GetProperty("entities").EnumerateArray())
+        {
+            if (workflow.GetProperty("name").GetString() == name)
+                return workflow.Clone();
+        }
+        return null;
+    }
+
+    private async Task<Change> ProvisionWorkflowAsync(string name, string? policyId, IReadOnlyList<string> channelIds, bool dryRun, CancellationToken cancellationToken)
+    {
+        var found = await FindWorkflowAsync(name, cancellationToken).ConfigureAwait(false);
+        var existing = found ?? default;
 
         var wantedChannels = channelIds.Order(StringComparer.Ordinal).ToArray();
         if (existing.ValueKind == JsonValueKind.Undefined)

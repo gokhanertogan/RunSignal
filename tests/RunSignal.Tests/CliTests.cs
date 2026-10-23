@@ -49,6 +49,19 @@ public sealed class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Destroy_removes_the_provisioned_alerts()
+    {
+        await Run("provision", _manifest, "--account-id", "42", "--api-key", "NRAK-x");
+        _output.GetStringBuilder().Clear();
+
+        Assert.Equal(0, await Run("destroy", "--service", "billing", "--account-id", "42", "--api-key", "NRAK-x"));
+
+        Assert.Contains("- policy RunSignal: billing (critical)", _output.ToString());
+        Assert.Empty(_nerdGraph.Policies);
+        Assert.Empty(_nerdGraph.Conditions);
+    }
+
+    [Fact]
     public async Task Errors_are_one_line_and_exit_with_1()
     {
         Assert.Equal(1, await Run("plan", "/does/not/exist.json"));

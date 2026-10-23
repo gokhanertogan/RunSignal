@@ -1,6 +1,6 @@
 using Cronos;
 
-namespace RunSignal.NewRelic;
+namespace RunSignal.Alerting;
 
 /// <summary>
 /// Reads the cron schedules in a manifest: 5-field Unix cron, or 6 fields with seconds first. Day of week is

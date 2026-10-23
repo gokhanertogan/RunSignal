@@ -67,6 +67,7 @@ public class AlertPlannerTests
         Assert.Equal(10, lowOutput.Threshold);
 
         Assert.Equal(0.2, Single(plan, AlertKind.FailureRate).Threshold);
+        Assert.Contains("More than 20% of the runs", Single(plan, AlertKind.FailureRate).Description);
         Assert.Equal(0.2, Single(plan, AlertKind.ItemFailureRate).Threshold);
         Assert.DoesNotContain(plan.Policies.SelectMany(p => p.Conditions), c => c.Kind == AlertKind.Failed);
         Assert.Equal("RunSignal: billing (warning)", Assert.Single(plan.Policies, p => p.Conditions.Count > 0).Name);
@@ -187,5 +188,25 @@ public sealed class NewRelicProvisionerTests : IDisposable
         var updated = await _provisioner.ProvisionAsync(Plan(s_invoice), channels, dryRun: false);
         Assert.Contains(new Change(ChangeKind.Update, "workflow", "RunSignal: billing (critical)"), updated);
         Assert.Equal(2, workflow["destinationConfigurations"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public async Task Destroy_removes_what_RunSignal_created_and_keeps_hand_made_conditions()
+    {
+        var channels = new Dictionary<Severity, IReadOnlyList<string>> { [Severity.Critical] = ["teams-channel"] };
+        await _provisioner.ProvisionAsync(Plan(s_invoice, new WorkloadManifestEntry { Name = "stock-sync", ExpectEverySeconds = 300 }), channels, dryRun: false);
+        var warningPolicy = _nerdGraph.Policies.Single(p => p.Value.EndsWith("(warning)")).Key;
+        _nerdGraph.AddUnmanagedCondition(warningPolicy, "hand-made");
+
+        var dry = await _provisioner.DestroyAsync("billing", dryRun: true);
+        Assert.Contains(new Change(ChangeKind.Delete, "policy", "RunSignal: billing (critical)"), dry);
+        Assert.Equal(2, _nerdGraph.Policies.Count); // nothing changed yet
+
+        await _provisioner.DestroyAsync("billing", dryRun: false);
+
+        Assert.Equal(["RunSignal: billing (warning)"], _nerdGraph.Policies.Values);
+        Assert.Equal(["hand-made"], _nerdGraph.Conditions.Values.Select(c => c["name"]!.GetValue<string>()));
+        Assert.Empty(_nerdGraph.Workflows);
+        Assert.Empty(await _provisioner.DestroyAsync("someone-else", dryRun: false));
     }
 }

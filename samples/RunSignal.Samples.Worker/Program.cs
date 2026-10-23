@@ -4,7 +4,8 @@ using OpenTelemetry.Trace;
 using RunSignal;
 
 // Two workloads that HTTP monitoring never sees: a loop that syncs stock, and a job that imports invoices.
-// With NEW_RELIC_LICENSE_KEY set, signals go to New Relic over OTLP (NEW_RELIC_REGION=EU for the EU data center);
+// With RUNSIGNAL_OTLP_ENDPOINT set, metrics go to that OTLP/HTTP endpoint (for example Prometheus); with
+// NEW_RELIC_LICENSE_KEY set, signals go to New Relic over OTLP (NEW_RELIC_REGION=EU for the EU data center);
 // otherwise metrics are printed to the console every 10 seconds.
 var builder = Host.CreateApplicationBuilder(args);
 var licenseKey = Environment.GetEnvironmentVariable("NEW_RELIC_LICENSE_KEY");
@@ -31,6 +32,18 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(m =>
     {
         m.AddRunSignalInstrumentation();
+        if (Environment.GetEnvironmentVariable("RUNSIGNAL_OTLP_ENDPOINT") is { } endpoint)
+        {
+            // Any OTLP/HTTP backend, such as Prometheus 3 (http://localhost:9090/api/v1/otlp/v1/metrics).
+            // Prometheus expects cumulative temporality, the OpenTelemetry default.
+            m.AddOtlpExporter((exporter, reader) =>
+            {
+                exporter.Endpoint = new Uri(endpoint);
+                exporter.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+                reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10_000;
+            });
+            return;
+        }
         if (licenseKey is null)
         {
             m.AddConsoleExporter((_, reader) => reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10_000);
@@ -49,6 +62,8 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(t =>
     {
         t.AddRunSignalInstrumentation();
+        if (Environment.GetEnvironmentVariable("RUNSIGNAL_OTLP_ENDPOINT") is not null)
+            return;
         if (licenseKey is null)
             t.AddConsoleExporter();
         else
