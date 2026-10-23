@@ -111,3 +111,10 @@ runtime (for example Hangfire recurring jobs registered in code, or cron trigger
 only the running application knows its complete set of workloads. At startup, SDKs discover jobs that have not
 run yet from their schedulers, so a job that never starts still gets a `missed` alert. Durations are in seconds.
 Workloads are sorted by name, and the manifest contains no timestamps, so it diffs cleanly.
+
+## Conformance
+
+[conformance/](conformance) holds the vectors every SDK tests against:
+
+- [workload-names.json](conformance/workload-names.json): how job identifiers become workload names.
+- [signals.json](conformance/signals.json): a scenario of runs, items and heartbeats, and the exact metrics it must produce (names, types, units, attributes, values and histogram bounds).

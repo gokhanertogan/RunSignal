@@ -1,0 +1,74 @@
+{
+  "description": "Every SDK runs this scenario against the OpenTelemetry SDK, collects once, and must produce exactly the expected metrics. Points are compared as sets. Counter points compare values, histogram points compare counts (durations vary), and gauge points compare only their presence (ages vary).",
+  "workloads": [
+    { "name": "conf-scheduled", "schedule": "0 2 * * *", "maxDurationSeconds": 1800, "minProcessed": 5, "severity": "critical" },
+    { "name": "conf-loop", "expectEverySeconds": 300, "failureRateThreshold": 0.2 },
+    { "name": "conf-idle" }
+  ],
+  "actions": [
+    { "workload": "conf-scheduled", "action": "succeed" },
+    { "workload": "conf-scheduled", "action": "failCode", "code": "statement_missing" },
+    { "workload": "conf-scheduled", "action": "processed", "count": 3 },
+    { "workload": "conf-scheduled", "action": "itemFailed", "count": 1 },
+    { "workload": "conf-loop", "action": "beat" },
+    { "workload": "conf-loop", "action": "beat" },
+    { "workload": "conf-loop", "action": "cancel" }
+  ],
+  "expected": [
+    {
+      "name": "runsignal.workload.runs",
+      "type": "counter",
+      "unit": "{run}",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.outcome": "success" }, "value": 1 },
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.outcome": "failure", "error.type": "statement_missing" }, "value": 1 },
+        { "attributes": { "runsignal.workload": "conf-loop", "runsignal.outcome": "cancelled" }, "value": 1 }
+      ]
+    },
+    {
+      "name": "runsignal.workload.duration",
+      "type": "histogram",
+      "unit": "s",
+      "bounds": [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 28800],
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.outcome": "success" }, "count": 1 },
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.outcome": "failure" }, "count": 1 },
+        { "attributes": { "runsignal.workload": "conf-loop", "runsignal.outcome": "cancelled" }, "count": 1 }
+      ]
+    },
+    {
+      "name": "runsignal.workload.items",
+      "type": "counter",
+      "unit": "{item}",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.item.result": "processed" }, "value": 3 },
+        { "attributes": { "runsignal.workload": "conf-scheduled", "runsignal.item.result": "failed" }, "value": 1 }
+      ]
+    },
+    {
+      "name": "runsignal.workload.heartbeats",
+      "type": "counter",
+      "unit": "{heartbeat}",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-loop" }, "value": 2 }
+      ]
+    },
+    {
+      "name": "runsignal.workload.since_success",
+      "type": "gauge",
+      "unit": "s",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-scheduled" } },
+        { "attributes": { "runsignal.workload": "conf-loop" } }
+      ]
+    },
+    {
+      "name": "runsignal.workload.since_heartbeat",
+      "type": "gauge",
+      "unit": "s",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-loop" } }
+      ]
+    }
+  ]
+}
