@@ -132,7 +132,7 @@ err := invoices.Run(ctx, func(ctx context.Context) error {
 })
 ```
 
-More: [src/RunSignal.Go](src/RunSignal.Go)
+More: [go/](go)
 </details>
 
 <details>
@@ -328,13 +328,13 @@ For workloads that run thousands of times per second, turn off the per-run span 
 
 ```
 spec/                    signal contract, manifest schema, conformance vectors
+go/                      Go SDK (+ rscron), module github.com/gokhanertogan/RunSignal/go
 src/
   RunSignal.Core …       .NET SDK and integrations (DotNet, OpenTelemetry, Hangfire, Quartz, Quartz4)
   RunSignal.Alerting     backend-neutral alert thresholds
   RunSignal.NewRelic     New Relic alert and dashboard provisioning
   RunSignal.Prometheus   Prometheus rule generation
   RunSignal.Cli          the runsignal tool
-  RunSignal.Go           Go SDK (+ rscron)
   RunSignal.Java         Java SDK (core + Spring Boot starter)
   RunSignal.Node         Node.js SDK (+ BullMQ)
   RunSignal.Rust         Rust SDK
@@ -349,12 +349,15 @@ docs/                    roadmap, .NET guide
 |---|---|---|
 | .NET | .NET 8 and 10 SDKs | `dotnet test` |
 | Prometheus rules | `promtool` | `promtool test rules tests/prometheus/rules.test.yml` |
-| Go | Go 1.26+ | `cd src/RunSignal.Go && go test -race ./...` |
+| Go | Go 1.26+ | `cd go && go test -race ./...` |
 | Java | Java 17+, Maven | `cd src/RunSignal.Java && mvn install` (Spring Boot 3: `-Dspring-boot.version=3.5.16 -Dbatch=5`) |
 | Node.js | Node.js 20+, `redis-server` | `cd src/RunSignal.Node && npm ci && npm test` |
 | Rust | Rust 1.75+ | `cd src/RunSignal.Rust && cargo test` |
 
 CI runs all of them, and the Java suite runs against Spring Boot 3.2, 3.5 and 4.1.
+
+Releases publish every package with one tag; see [docs/RELEASING.md](docs/RELEASING.md). Contributions are
+welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 

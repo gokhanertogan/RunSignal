@@ -1,9 +1,9 @@
-module github.com/gokhanertogan/RunSignal/src/RunSignal.Go/examples/worker
+module github.com/gokhanertogan/RunSignal/go/examples/worker
 
 go 1.26.0
 
 require (
-	github.com/gokhanertogan/RunSignal/src/RunSignal.Go v0.0.0
+	github.com/gokhanertogan/RunSignal/go v0.0.0
 	github.com/robfig/cron/v3 v3.0.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
@@ -35,4 +35,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/gokhanertogan/RunSignal/src/RunSignal.Go => ../..
+replace github.com/gokhanertogan/RunSignal/go => ../..

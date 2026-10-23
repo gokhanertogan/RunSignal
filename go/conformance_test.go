@@ -14,7 +14,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
 )
 
 type conformancePoint struct {
@@ -52,7 +52,7 @@ type conformanceSpec struct {
 
 // spec/conformance/signals.json: every SDK runs the same scenario and must emit exactly the same metrics.
 func TestConformanceSignals(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "spec", "conformance", "signals.json"))
+	data, err := os.ReadFile(filepath.Join("..", "spec", "conformance", "signals.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

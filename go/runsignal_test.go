@@ -17,7 +17,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
 )
 
 type harness struct {
@@ -257,7 +257,7 @@ func TestRegistryValidatesNamesAndOptions(t *testing.T) {
 
 // The vectors every SDK must agree on.
 func TestToWorkloadNameConformance(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "spec", "conformance", "workload-names.json"))
+	data, err := os.ReadFile(filepath.Join("..", "spec", "conformance", "workload-names.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

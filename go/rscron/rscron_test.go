@@ -12,8 +12,8 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
-	"github.com/gokhanertogan/RunSignal/src/RunSignal.Go/rscron"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
+	"github.com/gokhanertogan/RunSignal/go/rscron"
 )
 
 func outcomes(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {

@@ -1,4 +1,4 @@
-module github.com/gokhanertogan/RunSignal/src/RunSignal.Go
+module github.com/gokhanertogan/RunSignal/go
 
 go 1.26.0
 

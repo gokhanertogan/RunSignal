@@ -6,7 +6,7 @@ SDK, so the `runsignal` CLI provisions the same New Relic alerts for Go services
 [main README](../../README.md) for the concepts and the alerts.
 
 ```bash
-go get github.com/gokhanertogan/RunSignal/src/RunSignal.Go   # needs access to the repository while it is private
+go get github.com/gokhanertogan/RunSignal/go
 ```
 
 Requires Go 1.26 or later, because OpenTelemetry Go requires it.

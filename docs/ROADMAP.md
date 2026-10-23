@@ -71,7 +71,7 @@ path, no in-process rule evaluation).
 Thin SDKs on each language's OpenTelemetry API. Shared conformance vectors in `spec/conformance/` keep them in
 agreement; the first ones cover workload naming.
 
-1. **Go** ✅ ([src/RunSignal.Go](../src/RunSignal.Go)):
+1. **Go** ✅ ([go/](../go)):
    - The same instruments, attributes and manifest as .NET.
    - `Workload.Run` with cancellation and panic handling, an `ErrorTyper` interface for stable error codes, and `rscron` for robfig/cron.
    - No allocations on the hot path. `WithoutTracing()` is for workloads that run thousands of times per second, because the global tracer allocates per run.

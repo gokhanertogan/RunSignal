@@ -1,0 +1,193 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 publishes every package with that version:
+#   NuGet (10 packages, including the runsignal tool), npm (@runsignal/node), crates.io (runsignal),
+#   Maven Central (io.github.gokhanertogan.runsignal) and Go (tag go/v0.1.0), then creates a GitHub release.
+#
+# Credentials: each registry uses a token secret when it is set, and Trusted Publishing (OIDC) otherwise.
+# npm and crates.io need a token for the very first publish; after that, configure Trusted Publishing for
+# this workflow on the registry and delete NPM_TOKEN / CARGO_REGISTRY_TOKEN / NUGET_API_KEY.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        name: Every package must have the tag's version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dotnet=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)
+          npm=$(node -p "require('./src/RunSignal.Node/package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src/RunSignal.Rust/Cargo.toml | head -1)
+          maven=$(awk '/<artifactId>runsignal-parent<\/artifactId>/ {f=1} f && /<version>/ {gsub(/.*<version>|<\/version>.*/, ""); print; exit}' src/RunSignal.Java/pom.xml)
+          echo "tag=$version dotnet=$dotnet npm=$npm cargo=$cargo maven=$maven"
+          for v in "$dotnet" "$npm" "$cargo" "$maven"; do
+            if [ "$v" != "$version" ]; then echo "::error::Package version $v does not match tag $GITHUB_REF_NAME"; exit 1; fi
+          done
+          grep -q "^## $version" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  nuget:
+    name: NuGet
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet test -c Release
+      - name: Pack
+        run: |
+          for p in Core DotNet OpenTelemetry Hangfire Quartz Quartz4 Alerting NewRelic Prometheus Cli; do
+            dotnet pack src/RunSignal.$p -c Release -o artifacts
+          done
+      - name: Log in with Trusted Publishing
+        if: env.NUGET_API_KEY == ''
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${NUGET_API_KEY:-$TRUSTED_KEY}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          TRUSTED_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*
+
+  npm:
+    name: npm
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    defaults:
+      run:
+        working-directory: src/RunSignal.Node
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest   # Trusted Publishing needs npm 11.5.1 or later
+      - run: npm ci
+      - run: sudo apt-get install -y redis-server && npm test
+      - name: Publish with a token
+        if: env.NPM_TOKEN != ''
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish with Trusted Publishing
+        if: env.NPM_TOKEN == ''
+        run: npm publish --access public
+
+  crates:
+    name: crates.io
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        working-directory: src/RunSignal.Rust
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - name: Log in with Trusted Publishing
+        if: env.CARGO_TOKEN == ''
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ env.CARGO_TOKEN || steps.auth.outputs.token }}
+
+  maven:
+    name: Maven Central
+    needs: check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RunSignal.Java
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - run: mvn -B -Prelease deploy
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+
+  go:
+    name: Go
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+      - run: cd go && go test ./...
+      - name: Tag the Go module and ask the Go proxy to fetch it
+        run: |
+          tag="go/${GITHUB_REF_NAME}"
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "$tag"
+          GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "github.com/gokhanertogan/RunSignal/go@${GITHUB_REF_NAME}" || true
+
+  release:
+    name: GitHub release
+    needs: [check, nuget, npm, crates, maven, go]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+      - name: Create the release with this version's changelog
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          awk -v v="## $version" '$0 ~ "^"v {p=1; next} /^## / {p=0} p' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" artifacts/* --title "RunSignal $version" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

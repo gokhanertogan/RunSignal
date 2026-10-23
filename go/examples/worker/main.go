@@ -25,8 +25,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
-	"github.com/gokhanertogan/RunSignal/src/RunSignal.Go/rscron"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
+	"github.com/gokhanertogan/RunSignal/go/rscron"
 )
 
 const service = "runsignal-go-sample"

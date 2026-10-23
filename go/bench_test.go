@@ -6,7 +6,7 @@ import (
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
 )
 
 // Hot-path cost with an OpenTelemetry SDK meter provider attached. Tracing is off unless the benchmark says

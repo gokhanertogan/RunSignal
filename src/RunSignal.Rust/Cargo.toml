@@ -6,6 +6,11 @@ rust-version = "1.75.0"
 description = "Monitor Rust background work that no HTTP status code describes (scheduled jobs, consumers, pipelines) with OpenTelemetry, and alert on missed, overrunning, stalled or low-output jobs."
 license = "MIT"
 repository = "https://github.com/gokhanertogan/RunSignal"
+homepage = "https://github.com/gokhanertogan/RunSignal"
+documentation = "https://docs.rs/runsignal"
+readme = "README.md"
+# Reads ../../spec, which is not part of the published crate.
+exclude = ["tests/conformance.rs"]
 keywords = ["observability", "opentelemetry", "monitoring", "cron", "alerting"]
 categories = ["development-tools::debugging"]
 

@@ -14,7 +14,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	runsignal "github.com/gokhanertogan/RunSignal/src/RunSignal.Go"
+	runsignal "github.com/gokhanertogan/RunSignal/go"
 )
 
 // AddFunc schedules fn on c under spec and records each run as a run of the workload called name. The

@@ -6,7 +6,7 @@
   "author": "Gokhan Ertogan",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gokhanertogan/RunSignal.git",
+    "url": "git+https://github.com/gokhanertogan/RunSignal.git",
     "directory": "src/RunSignal.Node"
   },
   "keywords": [
@@ -41,7 +41,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 'dist-test/test/**/*.test.js'",
-    "bench": "tsc -p tsconfig.test.json && node dist-test/test/bench.js"
+    "bench": "tsc -p tsconfig.test.json && node dist-test/test/bench.js",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.9.0",
@@ -61,5 +62,14 @@
     "bullmq": "^6.4.0",
     "ioredis": "^6.0.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "homepage": "https://github.com/gokhanertogan/RunSignal/tree/main/src/RunSignal.Node#readme",
+  "bugs": {
+    "url": "https://github.com/gokhanertogan/RunSignal/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false
 }
