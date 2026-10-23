@@ -46,8 +46,59 @@ public class RunSignalAutoConfiguration {
   }
 
   @Bean
-  public ScheduledWorkloads runSignalScheduledWorkloads(WorkloadRegistry registry, Environment environment) {
-    return new ScheduledWorkloads(registry, environment);
+  public ScheduledWorkloads runSignalScheduledWorkloads(WorkloadRegistry registry, Environment environment, RunSignalProperties properties) {
+    return new ScheduledWorkloads(registry, environment, properties);
+  }
+
+  /** Monitors Spring Batch jobs when Spring Batch 5 or 6 is on the classpath. */
+  @Bean
+  public static org.springframework.beans.factory.config.BeanPostProcessor runSignalBatchJobListener(
+      ObjectProvider<WorkloadRegistry> registry, ObjectProvider<RunSignalProperties> properties, org.springframework.context.ApplicationContext context) {
+    ClassLoader classLoader = context.getClassLoader();
+    if (classLoader == null || !BatchJobListener.batchPresent(classLoader)) {
+      return new org.springframework.beans.factory.config.BeanPostProcessor() { };
+    }
+    return new LazyBatchJobListener(registry, properties, classLoader);
+  }
+
+  // Bean post-processors are created early; resolve the registry only when the first job bean appears.
+  private static final class LazyBatchJobListener implements org.springframework.beans.factory.config.BeanPostProcessor {
+    private final ObjectProvider<WorkloadRegistry> registry;
+    private final ObjectProvider<RunSignalProperties> properties;
+    private final ClassLoader classLoader;
+    private volatile BatchJobListener delegate;
+
+    LazyBatchJobListener(ObjectProvider<WorkloadRegistry> registry, ObjectProvider<RunSignalProperties> properties, ClassLoader classLoader) {
+      this.registry = registry;
+      this.properties = properties;
+      this.classLoader = classLoader;
+    }
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String beanName) {
+      if (!isJob(bean)) {
+        return bean;
+      }
+      BatchJobListener d = delegate;
+      if (d == null) {
+        synchronized (this) {
+          if (delegate == null) {
+            delegate = new BatchJobListener(registry.getObject(), properties.getObject(), classLoader);
+          }
+          d = delegate;
+        }
+      }
+      return d.postProcessAfterInitialization(bean, beanName);
+    }
+
+    private static boolean isJob(Object bean) {
+      for (Class<?> c = bean.getClass(); c != null; c = c.getSuperclass()) {
+        if (c.getName().equals("org.springframework.batch.core.job.AbstractJob")) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 
   @Bean

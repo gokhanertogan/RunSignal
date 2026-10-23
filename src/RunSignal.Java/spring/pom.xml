@@ -39,5 +39,65 @@
       <artifactId>opentelemetry-sdk-testing</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-batch</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <!-- Spring Batch 6 (Spring Boot 4) moved its types to new packages, so each major version has its own test
+       sources. The listener itself works with both by reflection. Run the Batch 5 tests with -Dbatch=5. -->
+  <properties>
+    <batch.tests>src/test-batch6/java</batch.tests>
+  </properties>
+
+  <profiles>
+    <profile>
+      <id>batch5</id>
+      <activation>
+        <property>
+          <name>batch</name>
+          <value>5</value>
+        </property>
+      </activation>
+      <properties>
+        <batch.tests>src/test-batch5/java</batch.tests>
+      </properties>
+    </profile>
+  </profiles>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <id>batch-tests</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>add-test-source</goal>
+            </goals>
+            <configuration>
+              <sources>
+                <source>${batch.tests}</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

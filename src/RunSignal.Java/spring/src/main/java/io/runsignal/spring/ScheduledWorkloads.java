@@ -21,11 +21,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 public final class ScheduledWorkloads {
   private final WorkloadRegistry registry;
   private final Environment environment;
+  private final RunSignalProperties properties;
   private final Map<Method, Workload> workloads = new ConcurrentHashMap<>();
 
-  public ScheduledWorkloads(WorkloadRegistry registry, Environment environment) {
+  public ScheduledWorkloads(WorkloadRegistry registry, Environment environment, RunSignalProperties properties) {
     this.registry = registry;
     this.environment = environment;
+    this.properties = properties;
   }
 
   /** The workload for a scheduled method, created on first use. {@code resolvedCron} may be null. */
@@ -51,6 +53,10 @@ public final class ScheduledWorkloads {
       options.severity(annotation.severity());
     }
     String schedule = annotation != null && !annotation.schedule().isEmpty() ? annotation.schedule() : cronOf(method, resolvedCron);
+    RunSignalProperties.Workload configured = properties.getWorkloads().get(name);
+    if (configured != null) {
+      return registry.getOrAdd(name, configured.toOptions(schedule));
+    }
     if (schedule != null) options.schedule(schedule);
     return registry.getOrAdd(name, options.build());
   }

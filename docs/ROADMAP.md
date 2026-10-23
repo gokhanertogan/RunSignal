@@ -91,7 +91,10 @@ agreement; the first ones cover workload naming.
    - Tested against Spring Boot 3.2, 3.5 and 4.1.
    - Verified live: the .NET CLI provisioned its alerts unchanged.
    - Lazy `GlobalOpenTelemetry` resolution avoids fixing the global instance to a no-op before the agent starts.
-   - Follow-up: Spring Batch.
+   - Spring Batch ✅:
+     - Job executions are runs, written items are processed, and skipped items are failed.
+     - It works with Batch 5 and 6 from one starter by reflection, because Batch 6 moved its packages. It is tested on Boot 3.2/3.5 (Batch 5) and 4.1 (Batch 6).
+     - Expectations can also come from `runsignal.workloads.<name>.*` properties.
 4. **Rust** ✅ ([src/RunSignal.Rust](../src/RunSignal.Rust), `runsignal` crate):
    - Depends only on the `opentelemetry` API and `unicode-normalization`.
    - `run` and `run_async`; a dropped future records a cancelled run.
@@ -102,7 +105,7 @@ agreement; the first ones cover workload naming.
 
 All five SDKs are now live-verified against New Relic, each provisioned by the same CLI from its own manifest.
 
-Still to do: extend the conformance suite beyond names, by running the same scenarios against every SDK and comparing the exported OTLP with golden files.
+Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exact metrics it must produce: names, types, units, attributes, values and histogram bounds. Every SDK's test suite runs it against its OpenTelemetry SDK, so an SDK that drifts from the spec fails its own CI. The tests were checked to fail when the expected values change.
 
 ### Phase 6: More backends
 - **Prometheus / Grafana** ✅:
