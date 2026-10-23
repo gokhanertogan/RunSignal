@@ -15,6 +15,12 @@ internal sealed class FakeNerdGraph : HttpMessageHandler
     public Dictionary<string, string> Policies { get; } = new();                 // id -> name
     public Dictionary<string, JsonObject> Conditions { get; } = new();          // id -> condition (with policyId)
     public Dictionary<string, JsonObject> Workflows { get; } = new();           // id -> workflow
+    public Dictionary<string, JsonObject> Dashboards { get; } = new();          // guid -> dashboard
+
+    /// <summary>How many entity searches miss a newly created dashboard, like New Relic's search index lag.</summary>
+    public int SearchLag { get; set; }
+
+    private readonly Dictionary<string, int> _searchMisses = new();
     public List<string> Operations { get; } = new();
     public string? LastApiKey { get; private set; }
     public Uri? LastUri { get; private set; }
@@ -90,6 +96,75 @@ internal sealed class FakeNerdGraph : HttpMessageHandler
             return new JsonObject { ["alertsConditionDelete"] = new JsonObject { ["id"] = id } };
         }
 
+        if (query.Contains("dashboardCreate"))
+        {
+            var dashboard = v["dashboard"]!.DeepClone().AsObject();
+            var guid = AddDashboard(dashboard);
+            Operations.Add("create dashboard " + dashboard["name"]);
+            _searchMisses[guid] = SearchLag;
+            return new JsonObject { ["dashboardCreate"] = new JsonObject { ["entityResult"] = new JsonObject { ["guid"] = guid }, ["errors"] = new JsonArray() } };
+        }
+
+        if (query.Contains("dashboardUpdate"))
+        {
+            var guid = v["guid"]!.GetValue<string>();
+            Operations.Add("update dashboard " + Dashboards[guid]["name"]);
+            Dashboards[guid] = v["dashboard"]!.DeepClone().AsObject();
+            return new JsonObject { ["dashboardUpdate"] = new JsonObject { ["entityResult"] = new JsonObject { ["guid"] = guid }, ["errors"] = new JsonArray() } };
+        }
+
+        if (query.Contains("dashboardDelete"))
+        {
+            var guid = v["guid"]!.GetValue<string>();
+            Operations.Add("delete dashboard " + Dashboards[guid]["name"]);
+            Dashboards.Remove(guid);
+            return new JsonObject { ["dashboardDelete"] = new JsonObject { ["status"] = "SUCCESS", ["errors"] = new JsonArray() } };
+        }
+
+        if (query.Contains("entitySearch"))
+        {
+            Operations.Add("entitySearch");
+            var name = System.Text.RegularExpressions.Regex.Match(v["query"]!.GetValue<string>(), "name = '(.*)'$").Groups[1].Value;
+            var entities = new JsonArray();
+            foreach (var (guid, dashboard) in Dashboards)
+            {
+                if (dashboard["name"]!.GetValue<string>() != name)
+                    continue;
+                if (_searchMisses.TryGetValue(guid, out var misses) && misses > 0)
+                {
+                    _searchMisses[guid] = misses - 1;
+                    continue;
+                }
+                entities.Add(new JsonObject { ["guid"] = guid, ["name"] = name, ["dashboardParentGuid"] = null });
+                // Pages are entities too, with the dashboard as their parent.
+                entities.Add(new JsonObject { ["guid"] = guid + "-page", ["name"] = name, ["dashboardParentGuid"] = guid });
+            }
+            return new JsonObject { ["actor"] = new JsonObject { ["entitySearch"] = new JsonObject { ["results"] = new JsonObject { ["entities"] = entities } } } };
+        }
+
+        if (query.Contains("entity(guid"))
+        {
+            var guid = v["guid"]!.GetValue<string>();
+            if (!Dashboards.TryGetValue(guid, out var dashboard))
+                return new JsonObject { ["actor"] = new JsonObject { ["entity"] = null } };
+            var pages = new JsonArray(dashboard["pages"]!.AsArray().Select(page => (JsonNode)new JsonObject
+            {
+                ["widgets"] = new JsonArray(page!["widgets"]!.AsArray().Select(w => (JsonNode)new JsonObject
+                {
+                    ["title"] = w!["title"]!.DeepClone(),
+                    ["visualization"] = w["visualization"]!.DeepClone(),
+                    ["layout"] = w["layout"]!.DeepClone(),
+                    // New Relic adds its own settings to the raw configuration.
+                    ["rawConfiguration"] = new JsonObject
+                    {
+                        ["nrqlQueries"] = w["rawConfiguration"]!["nrqlQueries"]!.DeepClone(),
+                        ["platformOptions"] = new JsonObject { ["ignoreTimeRange"] = false },
+                    },
+                }).ToArray()),
+            }).ToArray());
+            return new JsonObject { ["actor"] = new JsonObject { ["entity"] = new JsonObject { ["description"] = dashboard["description"]!.DeepClone(), ["pages"] = pages } } };
+        }
+
         if (query.Contains("alertsPolicyDelete"))
         {
             var id = v["id"]!.GetValue<string>();
@@ -155,6 +230,14 @@ internal sealed class FakeNerdGraph : HttpMessageHandler
             ["policyId"] = policyId,
             ["description"] = "Created by hand.",
         };
+    }
+
+    /// <summary>Stores a dashboard as if it existed already, and returns its guid.</summary>
+    public string AddDashboard(JsonObject dashboard)
+    {
+        var guid = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"42|VIZ|DASHBOARD|da:{_nextId++}")).TrimEnd('=');
+        Dashboards[guid] = dashboard;
+        return guid;
     }
 
     private static JsonObject Filter(string id, JsonObject input) => new()

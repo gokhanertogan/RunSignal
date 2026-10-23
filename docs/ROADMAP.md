@@ -63,7 +63,6 @@ path, no in-process rule evaluation).
   - Stopping the process opened `missed` and `stalled` through loss of signal after 15 minutes.
   - The live API also showed that EVENT_FLOW conditions require `aggregationDelay`, and that NerdGraph puts error details in `extensions`, which the CLI now prints.
 - Follow-ups:
-  - Not yet seen firing live: `overrun`, `low output`, the failure rates, and `missed` from its threshold alone (as opposed to from loss of signal).
   - Low output is approximate for runs longer than its one-hour window.
   - Overrun only sees runs that finish (a hung run shows up as missed or stalled).
   - Workflows match one policy each.
@@ -116,6 +115,14 @@ Still to do: extend the conformance suite beyond names, by running the same scen
 ### Phase 7: Notifications end to end (last)
 - Create notification channels from an existing Teams/Slack destination ID. The New Relic UI only creates channels inside workflows and does not show their IDs, so `--channel <id>` is awkward.
 - Verify a real Teams and Slack notification arriving from a RunSignal workflow.
+
+### New Relic dashboards and alert drill
+- `provision` creates and updates a dashboard per service, built from the same signals as the alerts, and `destroy` removes it. Updates happen only when the widgets changed.
+- Found live: New Relic's entity search lags behind writes, so two quick runs created a duplicate dashboard. Provision now waits until a new dashboard is searchable, and deletes duplicates that RunSignal created. The fake NerdGraph simulates the lag, so this stays covered by tests.
+- `samples/RunSignal.Samples.AlertDrill` breaks one expectation per workload on purpose, to check every alert kind end to end.
+- Every alert kind has now fired on a live New Relic account:
+  - From the drill: `overrun` and `stalled` (by threshold, with the process still reporting) within about 5 minutes; `failure rate` and `item failure rate` within about 30 minutes; `low output` once its hour closed.
+  - From earlier tests: `failed`, `missed` (by threshold in the Go test, and by loss of signal) and `stalled` by loss of signal.
 
 ### Also done
 - `runsignal destroy` removes what RunSignal created for a service, keeps conditions added by hand and never deletes notification channels. Verified live by cleaning up the five sample services.

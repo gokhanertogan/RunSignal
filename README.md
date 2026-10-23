@@ -298,7 +298,16 @@ runsignal provision runsignal.json --account-id 1234567 --region EU \
 ```
 
 `provision` creates one policy per service and severity (`RunSignal: billing-service (critical)`), its NRQL
-conditions, and a workflow that sends that policy's incidents to the given channels. It is idempotent: running
+conditions, and a workflow that sends that policy's incidents to the given channels. It also creates a
+dashboard, `RunSignal: billing-service`, which is the place to look when an alert fires. The dashboard shows:
+
+- runs by outcome
+- every workload's time since its last success and since its last heartbeat
+- p95 duration
+- items processed
+- failures by error type
+
+Pass `--no-dashboard` to skip it. It is idempotent: running
 it again changes only what changed in the manifest. It deletes conditions it created that are no longer in the
 manifest, and never touches conditions it did not create. Policies for `info` get no workflow unless you give
 them a channel.
@@ -315,7 +324,12 @@ them a channel.
 Schedules are read in UTC unless you pass `--time-zone Europe/Istanbul`. Tune the grace and the reporting
 timeout with `--missed-grace` and `--not-reporting-after` (minutes).
 
-To remove everything RunSignal created for a service, run
+To check that every alert actually reaches you before a real job fails, run the
+[alert drill](samples/RunSignal.Samples.AlertDrill). It is a small service whose workloads break one expectation
+each (overrun, low output, failure rate, stalled). On New Relic, overrun and stalled open within about 5 minutes,
+the failure rates within about 30 minutes, and low output once its one-hour window closes.
+
+To remove everything RunSignal created for a service, including its dashboard, run
 `runsignal destroy --service billing-service --account-id 1234567 [--dry-run]`. It deletes the workflows and
 the conditions RunSignal created, and deletes the policies once they are empty. Conditions you added by hand,
 and the policies that hold them, are kept, and notification channels are never deleted.

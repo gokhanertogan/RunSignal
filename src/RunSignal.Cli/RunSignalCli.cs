@@ -55,6 +55,8 @@ internal static class RunSignalCli
                           "Create the Teams or Slack destination and channel in New Relic first.",
         };
 
+        var noDashboard = new Option<bool>("--no-dashboard") { Description = "Do not create or update the service's RunSignal dashboard." };
+
         var plan = new Command("plan", "Show the alerts the manifests produce, without contacting New Relic.") { manifests, grace, notReporting, timeZone };
         plan.SetAction(Guarded(async (result, ct) =>
         {
@@ -65,13 +67,13 @@ internal static class RunSignalCli
 
         var diff = new Command("diff", "Show what provision would change in New Relic, without changing anything.")
         {
-            manifests, accountId, region, apiKey, channels, grace, notReporting, timeZone,
+            manifests, accountId, region, apiKey, channels, noDashboard, grace, notReporting, timeZone,
         };
         diff.SetAction(Guarded((result, ct) => ProvisionAsync(result, dryRun: true, ct)));
 
-        var provision = new Command("provision", "Create, update and delete the New Relic policies, conditions and workflows RunSignal manages.")
+        var provision = new Command("provision", "Create, update and delete the New Relic policies, conditions, workflows and dashboards RunSignal manages.")
         {
-            manifests, accountId, region, apiKey, channels, grace, notReporting, timeZone,
+            manifests, accountId, region, apiKey, channels, noDashboard, grace, notReporting, timeZone,
         };
         provision.SetAction(Guarded((result, ct) => ProvisionAsync(result, dryRun: false, ct)));
 
@@ -81,7 +83,7 @@ internal static class RunSignalCli
             Required = true,
         };
         var dryRun = new Option<bool>("--dry-run") { Description = "Show what would be removed without removing it." };
-        var destroy = new Command("destroy", "Remove the New Relic policies, conditions and workflows RunSignal created for a service. Conditions added by hand and notification channels are kept.")
+        var destroy = new Command("destroy", "Remove the New Relic policies, conditions, workflows and dashboard RunSignal created for a service. Conditions added by hand and notification channels are kept.")
         {
             services, accountId, region, apiKey, dryRun,
         };
@@ -94,12 +96,15 @@ internal static class RunSignalCli
                 return 1;
             }
             using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
-            var provisioner = new NewRelicProvisioner(new NerdGraphClient(http, key, result.GetValue(region)), result.GetValue(accountId));
+            var client = new NerdGraphClient(http, key, result.GetValue(region));
+            var provisioner = new NewRelicProvisioner(client, result.GetValue(accountId));
+            var dashboards = new NewRelicDashboards(client, result.GetValue(accountId));
             var isDryRun = result.GetValue(dryRun);
             var removed = 0;
             foreach (var service in result.GetValue(services)!)
             {
-                var changes = await provisioner.DestroyAsync(service, isDryRun, ct).ConfigureAwait(false);
+                var changes = (await provisioner.DestroyAsync(service, isDryRun, ct).ConfigureAwait(false)).ToList();
+                changes.AddRange(await dashboards.DestroyAsync(service, isDryRun, ct).ConfigureAwait(false));
                 await output.WriteLineAsync($"{service}:").ConfigureAwait(false);
                 if (changes.Count == 0)
                     await output.WriteLineAsync("  nothing to remove").ConfigureAwait(false);
@@ -173,13 +178,17 @@ internal static class RunSignalCli
 
             var routes = ParseChannels(result.GetValue(channels) ?? []);
             using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
-            var provisioner = new NewRelicProvisioner(new NerdGraphClient(http, key, result.GetValue(region)), result.GetValue(accountId));
+            var client = new NerdGraphClient(http, key, result.GetValue(region));
+            var provisioner = new NewRelicProvisioner(client, result.GetValue(accountId));
+            var dashboards = result.GetValue(noDashboard) ? null : new NewRelicDashboards(client, result.GetValue(accountId));
 
             var changed = 0;
             foreach (var alertPlan in await LoadPlansAsync(result, manifests, grace, notReporting, timeZone, ct))
             {
                 WriteWarnings(output, alertPlan);
-                var changes = await provisioner.ProvisionAsync(alertPlan, routes, dryRun, ct).ConfigureAwait(false);
+                var changes = (await provisioner.ProvisionAsync(alertPlan, routes, dryRun, ct).ConfigureAwait(false)).ToList();
+                if (dashboards is not null)
+                    changes.AddRange(await dashboards.ProvisionAsync(alertPlan.Service, dryRun, ct).ConfigureAwait(false));
                 await output.WriteLineAsync($"{alertPlan.Service}:").ConfigureAwait(false);
                 foreach (var change in changes)
                     await output.WriteLineAsync($"  {Symbol(change.Kind)} {change.Resource} {change.Name}").ConfigureAwait(false);
