@@ -2,70 +2,94 @@
 
 **Cross-language workload observability and alert provisioning.**
 
-Your APM alerts on HTTP 500s and slow endpoints. But the failures that hurt most often happen where no HTTP
-status code exists:
+Your APM alerts on HTTP 500s and slow endpoints. The failures that hurt most often happen where there is no
+HTTP request at all:
 
 - The 02:00 invoice job never started, because the server restarted or the scheduler got stuck.
 - A queue consumer is up but has not processed a message for 20 minutes.
 - The bank statement file did not arrive, so the import "succeeded" with 0 rows.
-- A `BackgroundService` loop is deadlocked, and its exception was swallowed in a `catch`.
+- A background loop is deadlocked, and its exception was swallowed in a `catch`.
 
-RunSignal records **runs, items and heartbeats** of background work as OpenTelemetry metrics and spans, with the
-same names in every language. From them it provisions the alerts you need, sent to Teams or Slack:
-**missed**, **overrun**, **stalled**, **low-output** and **failure-rate**.
+RunSignal records the **runs, items and heartbeats** of background work as OpenTelemetry metrics, with the same
+names in .NET, Go, Java, Node.js and Rust. From a manifest of what each job is expected to do, it **provisions
+the alerts and dashboards** in your observability backend: missed, failed, overrun, stalled, low output and
+failure rate.
 
-> Status: early development. The .NET packages (core, dependency injection, OpenTelemetry, Hangfire,
-> Quartz.NET), the Go, Node.js, Java and Rust SDKs, New Relic provisioning and the `runsignal` CLI work. They
-> have been verified end to end against a live New Relic account, with a service in each of the five languages
-> provisioned by the same CLI. Teams and Slack notifications are next.
-> See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-release.** Everything below works and is tested, including end to end against a live New Relic
+> account and a local Prometheus. The packages are not published to NuGet, npm, Maven Central or crates.io yet,
+> so for now you build them from source. Teams and Slack routing is implemented but not yet verified end to end.
+> See the [roadmap](docs/ROADMAP.md).
 
-## Why RunSignal
+## Contents
 
-- **Lives in the stack you already have.** Signals are plain OpenTelemetry, so they go to New Relic, Grafana,
-  Datadog or any OTLP backend. There is no new SaaS to sign up for.
-- **Alerts as code.** Workload expectations (schedule, max duration, heartbeat interval, minimum output) live
-  next to the code, and RunSignal provisions the matching alerts.
-- **Knows your scheduler.** Hangfire and Quartz.NET jobs are monitored without any code in the jobs, and their cron schedules become missed-run expectations.
-- **One model, many languages.** .NET, Java, Go, Node.js and Rust emit the same signals defined in
-  [spec/README.md](spec/README.md), so one set of alert rules covers all of them.
-- **Built for hot paths.** Recording a run, an item or a heartbeat does not allocate.
+- [How it works](#how-it-works)
+- [Concepts](#concepts)
+- [Quick start](#quick-start)
+- [Integrations](#integrations)
+- [Alerts](#alerts)
+- [Backends](#backends): [New Relic](#new-relic), [Prometheus and Grafana](#prometheus-and-grafana)
+- [CLI](#cli)
+- [Signals and specification](#signals-and-specification)
+- [Performance](#performance)
+- [Repository layout](#repository-layout)
+- [Building and testing](#building-and-testing)
 
-## Where it fits
+## How it works
 
-| Language | Typical tools | Scenarios |
+```mermaid
+flowchart LR
+    subgraph app["Your service (.NET, Go, Java, Node.js, Rust)"]
+        jobs["Jobs, consumers, loops"] --> sdk["RunSignal SDK"]
+    end
+    sdk -- "OTLP metrics" --> backend[("New Relic / Prometheus")]
+    sdk -- "manifest (JSON)" --> cli["runsignal CLI (CI)"]
+    cli -- "alerts + dashboard" --> backend
+    backend -- "incidents" --> people["On-call: Teams, Slack, Alertmanager"]
+```
+
+1. **Record.** The SDK records each run of a workload (success, failure, cancellation, duration), the items
+   it handled, and heartbeats from long-running loops. Integrations do this with no code for Hangfire, Quartz.NET,
+   Spring `@Scheduled`, Spring Batch, BullMQ and robfig/cron.
+2. **Describe.** Each workload declares what it is expected to do: its cron schedule, maximum duration,
+   heartbeat interval, minimum output and acceptable failure rate. The running application writes these to a
+   [manifest](spec/manifest.schema.json).
+3. **Provision.** In CI, `runsignal provision` turns the manifest into alert conditions and a dashboard in New
+   Relic, or `runsignal export prometheus` writes Prometheus alerting rules.
+
+Alerts are evaluated by the backend, never in your process, because a process that has died cannot report
+that it is missing.
+
+## Concepts
+
+| Term | Meaning |
+|---|---|
+| **Workload** | A unit of background work with a stable name, such as `nightly-invoice`: a scheduled job, a consumer, a sync loop. |
+| **Run** | One execution of a workload. It ends as `success`, `failure` (with an `error.type`) or `cancelled`. |
+| **Item** | One unit of work inside a run, such as an invoice or a message: `processed` or `failed`. |
+| **Heartbeat** | A periodic "alive and making progress" mark from a long-running loop. |
+| **Expectations** | What the workload should do. Each one produces an alert: |
+
+| Expectation | Example | Alert |
 |---|---|---|
-| .NET | Hangfire, Quartz.NET, `BackgroundService`, MassTransit, Azure Functions timers | E-invoicing, nightly billing and reports, ERP and marketplace sync, Service Bus / RabbitMQ consumers |
-| Java | Spring `@Scheduled`, Spring Batch, Quartz, Kafka | End-of-day banking batches, large ETL, Kafka consumers, reconciliation |
-| Go | Kubernetes CronJobs, `robfig/cron`, goroutine workers, NATS / Kafka | Platform jobs, K8s CronJobs, collectors, high-volume consumers |
-| Node.js | BullMQ, Agenda, `node-cron`, scheduled AWS Lambda | Email / SMS / push queues, webhook processing, serverless schedules, third-party API sync |
-| Rust | `tokio` tasks, `tokio-cron-scheduler`, `rdkafka` | High-throughput data pipelines, stream processing, long-lived daemons, edge collectors |
+| `schedule` | `0 2 * * *` | **missed**: no success within the schedule plus grace; **failed**: a run failed |
+| `maxDuration` | 30 minutes | **overrun**: a run took longer |
+| `expectEvery` | 5 minutes | **stalled**: no heartbeat in time |
+| `minProcessed` | 100 | **low output**: runs processed fewer items |
+| `failureRateThreshold` | 0.2 | **failure rate**: too many failed runs or items |
+| `severity` | `critical` | routes the alerts (for example, critical pages on-call) |
 
-## Packages
+## Quick start
 
-| Package | Purpose | Status |
-|---|---|---|
-| `RunSignal.Core` | Workloads, runs, items, heartbeats. No dependencies beyond the BCL | ✅ Working |
-| `RunSignal.DotNet` | `AddRunSignal()`, `AddWorkload()`, keyed injection | ✅ Working |
-| `RunSignal.OpenTelemetry` | `AddRunSignalInstrumentation()` for metrics and traces | ✅ Working |
-| `RunSignal.Hangfire` | Monitors every Hangfire job (Hangfire 1.8+) | ✅ Working |
-| `RunSignal.Quartz` / `RunSignal.Quartz4` | Monitors every Quartz.NET 3 / Quartz.NET 4 job | ✅ Working |
-| `RunSignal.NewRelic` | Plans and provisions New Relic alerts from a manifest | ✅ Working |
-| `RunSignal.Prometheus` | Prometheus alerting rules from a manifest | ✅ Working |
-| `RunSignal.Alerting` | Backend-neutral thresholds shared by the backends | ✅ Working |
-| `RunSignal.Cli` | The `runsignal` tool: `plan`, `diff`, `provision`, `destroy`, `export prometheus` | ✅ Working |
-| [`RunSignal.Go`](src/RunSignal.Go) | Go SDK with robfig/cron integration | ✅ Working |
-| [`RunSignal.Node`](src/RunSignal.Node) (`@runsignal/node`) | Node.js SDK with BullMQ integration | ✅ Working |
-| [`RunSignal.Java`](src/RunSignal.Java) | Java SDK and a Spring Boot starter for `@Scheduled` | ✅ Working |
-| [`RunSignal.Rust`](src/RunSignal.Rust) (`runsignal` crate) | Rust SDK with sync and async runs | ✅ Working |
+Every SDK follows the same three steps. The examples declare a nightly job that must succeed every day,
+finish within 30 minutes and process at least 100 invoices.
 
-The packages are not on NuGet yet.
+**1. Record the work.**
 
-## Quick start (.NET)
+<details open>
+<summary>.NET</summary>
 
 ```csharp
 builder.Services.AddRunSignal()
-    .AddWorkload("stock-sync", o => o.ExpectEvery = TimeSpan.FromMinutes(5))
     .AddWorkload("nightly-invoice", o =>
     {
         o.Schedule = "0 2 * * *";
@@ -73,293 +97,264 @@ builder.Services.AddRunSignal()
         o.MinProcessed = 100;
         o.Severity = Severity.Critical;
     });
+builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddRunSignalInstrumentation().AddOtlpExporter());
 
-builder.Services.AddOpenTelemetry()
-    .WithMetrics(m => m.AddRunSignalInstrumentation().AddOtlpExporter())
-    .WithTracing(t => t.AddRunSignalInstrumentation().AddOtlpExporter());
-```
-
-A scheduled job, recorded as one run that succeeds, fails or is cancelled:
-
-```csharp
-public class InvoiceJob([FromKeyedServices("nightly-invoice")] Workload workload)
+// In the job ([FromKeyedServices("nightly-invoice")] Workload workload):
+await workload.RunAsync(async ct =>
 {
-    public Task RunAsync(CancellationToken ct) => workload.RunAsync(async ct =>
+    foreach (var order in await orders.GetUnbilledAsync(ct))
     {
-        foreach (var order in await _orders.GetUnbilledAsync(ct))
-        {
-            await _invoices.CreateAsync(order, ct);
-            workload.Processed();
-        }
-    }, ct);
-}
-```
-
-A long-running loop, where a heartbeat on every pass reveals a loop that is alive but stuck:
-
-```csharp
-public class StockSyncWorker([FromKeyedServices("stock-sync")] Workload workload) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            await _client.SyncAsync(ct);
-            workload.Beat();
-            await Task.Delay(TimeSpan.FromMinutes(1), ct);
-        }
+        await invoices.CreateAsync(order, ct);
+        workload.Processed();
     }
-}
+}, ct);
 ```
 
-A failure without an exception, such as a missing input file:
+More: [docs/dotnet.md](docs/dotnet.md)
+</details>
 
-```csharp
-var run = workload.Start();
-var file = await _sftp.TryGetTodayStatementAsync();
-if (file is null)
-{
-    run.Fail("statement_missing", "No bank statement for today");
-    return;
-}
-workload.Processed(await _importer.ImportAsync(file));
-run.Succeed();
-```
+<details>
+<summary>Go</summary>
 
-Without dependency injection, use `WorkloadRegistry.Shared.Get("name")` once and keep the result.
+```go
+invoices := runsignal.Default.MustWorkload("nightly-invoice",
+    runsignal.Schedule("0 2 * * *"), runsignal.MaxDuration(30*time.Minute),
+    runsignal.MinProcessed(100), runsignal.WithSeverity(runsignal.Critical))
 
-## Hangfire
-
-```csharp
-builder.Services.AddRunSignal().AddHangfire();   // discovers recurring jobs at startup
-builder.Services.AddHangfire((sp, config) => config
-    .UseInMemoryStorage()                         // your storage
-    .UseRunSignal(sp));                           // every job run is now a workload run
-```
-
-That is all: success, failure (with the job's real exception type), cancellation on shutdown and duration are
-recorded for every job. Recurring jobs are named after their ID (`"Nightly Invoice"` becomes
-`nightly-invoice`), and their cron expression becomes the workload's schedule. Other jobs are named after their
-class and method (`InvoiceJobs.Generate` becomes `invoice-jobs.generate`).
-
-Name a job and set its expectations with `[Workload]`, and count items through `PerformContext`:
-
-```csharp
-[Workload("nightly-invoice", MaxDuration = "30m", MinProcessed = 100, Severity = Severity.Critical)]
-public async Task GenerateInvoices(PerformContext? context = null)
-{
-    foreach (var order in await _orders.GetUnbilledAsync())
-    {
-        await _invoices.CreateAsync(order);
-        context.GetWorkload()?.Processed();
+err := invoices.Run(ctx, func(ctx context.Context) error {
+    for _, order := range orders {
+        if err := createInvoice(ctx, order); err != nil {
+            return err
+        }
+        invoices.Processed(ctx, 1)
     }
+    return nil
+})
+```
+
+More: [src/RunSignal.Go](src/RunSignal.Go)
+</details>
+
+<details>
+<summary>Java (Spring Boot)</summary>
+
+```java
+@Scheduled(cron = "0 0 2 * * *")
+@RunSignal(value = "nightly-invoice", maxDuration = "30m", minProcessed = 100, severity = Severity.CRITICAL)
+void generateInvoices() {
+    // recorded automatically by runsignal-spring-boot-starter
 }
 ```
 
-Durations accept `90s`, `30m`, `2h`, `1d` or `hh:mm:ss`. Options declared with `AddWorkload` for the same name
-take precedence over the attribute.
+More: [src/RunSignal.Java](src/RunSignal.Java)
+</details>
 
-## Quartz.NET
+<details>
+<summary>Node.js</summary>
 
-```csharp
-builder.Services.AddRunSignal().AddQuartz();     // discovers scheduled jobs at startup
-builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>());
+```ts
+const invoices = defaultRegistry.workload('nightly-invoice', {
+  schedule: '0 2 * * *', maxDuration: '30m', minProcessed: 100, severity: 'critical',
+});
 
-// Quartz.NET 4 (package RunSignal.Quartz4, .NET 10): listeners take matchers.
-builder.Services.AddQuartz(q => q.AddJobListener<RunSignalJobListener>([GroupMatcher<JobKey>.AnyGroup()]));
+await invoices.run(async () => {
+  for (const order of await unbilledOrders()) {
+    await createInvoice(order);
+    invoices.processed();
+  }
+});
 ```
 
-Or, without dependency injection: `scheduler.UseRunSignal(WorkloadRegistry.Shared)` and
-`await scheduler.DiscoverRunSignalWorkloadsAsync(WorkloadRegistry.Shared)`.
+More: [src/RunSignal.Node](src/RunSignal.Node)
+</details>
 
-Jobs are named after their key (`reports.DailySales` becomes `reports.daily-sales`; the `DEFAULT` group is left
-out; a job scheduled without an identity, whose key is a random GUID, is named after its class), and a cron
-trigger's expression becomes the schedule. `[Workload]` works on the job class, and
-`context.GetWorkload()?.Processed()` counts items.
+<details>
+<summary>Rust</summary>
 
-Quartz.NET 4 changed its job and listener interfaces to `ValueTask` and supports only .NET 10, so it has its own
-package, `RunSignal.Quartz4`. It is built from the same sources and uses the same namespace, so moving from
-Quartz 3 to 4 only changes the package reference. It works with Quartz 4.0 and later, and is tested against 4.6,
-including named schedulers.
+```rust
+let invoices = Registry::global().workload("nightly-invoice", Options::new()
+    .schedule("0 2 * * *")
+    .max_duration(Duration::from_secs(30 * 60))
+    .min_processed(100)
+    .severity(Severity::Critical))?;
 
-Workload names are derived readably from any identifier, including non-ASCII ones: `e-Arşiv gönderimi` becomes
-`e-arsiv-gonderimi`.
-
-`AddHangfire()` and `AddQuartz()` register jobs as workloads as soon as the application starts, not when they
-first run. A job that never starts is exactly what the `missed` alert is for, so it has to be known before
-it runs.
-
-## Workload manifest
-
-The manifest lists every workload of a service and its expectations. The CLI will provision alerts from it
-([format](spec/manifest.schema.json)):
-
-```json
-{
-  "version": 1,
-  "service": "billing-service",
-  "workloads": [
-    { "name": "nightly-invoice", "schedule": "0 2 * * *", "maxDurationSeconds": 1800, "minProcessed": 100, "severity": "critical" },
-    { "name": "stock-sync", "expectEverySeconds": 300, "failureRateThreshold": 0.2, "severity": "warning" }
-  ]
-}
+invoices.run_async(async {
+    for order in unbilled_orders().await? {
+        create_invoice(&order).await?;
+        invoices.processed(1);
+    }
+    Ok::<_, anyhow::Error>(())
+}).await?;
 ```
 
-The application writes it once it has started and discovered its jobs. Turn it on with an environment
-variable, with no code change:
+More: [src/RunSignal.Rust](src/RunSignal.Rust)
+</details>
+
+**2. Export to your backend** over OTLP. For New Relic use **delta temporality**: with cumulative, a stopped
+workload never looks stopped. Prometheus works with the default (cumulative).
+
+**3. Provision alerts from CI.**
 
 ```bash
-RUNSIGNAL_MANIFEST_PATH=artifacts/runsignal.json dotnet run
+RUNSIGNAL_MANIFEST_PATH=runsignal.json <start your app>   # writes the manifest (see below)
+export NEW_RELIC_API_KEY=NRAK-...                          # a New Relic User API key
+runsignal provision runsignal.json --account-id 1234567 --region EU
 ```
 
-You can also set it in code: `AddRunSignal(o => { o.ManifestPath = "runsignal.json"; o.ServiceName = "billing-service"; })`.
-The service name defaults to `OTEL_SERVICE_NAME`, then the entry assembly name, and must match the
-`service.name` your signals are exported with. In code, use `registry.CreateManifest("billing-service").ToJson()`.
-The manifest comes from the running application, not the build, because schedules such as Hangfire recurring
-jobs exist only at runtime.
+.NET and the Spring Boot starter write the manifest by themselves once the application has started. In Go,
+Node.js and Rust, call `WriteManifestFromEnv` / `writeManifestFromEnv` / `write_manifest_from_env` once your
+workloads are registered.
 
-A runnable example is in [samples/RunSignal.Samples.Worker](samples/RunSignal.Samples.Worker):
-`dotnet run --project samples/RunSignal.Samples.Worker`. It prints the signals to the console, or sends them to
-New Relic when `NEW_RELIC_LICENSE_KEY` (and `NEW_RELIC_REGION=EU` for the EU data center) is set.
+## Integrations
 
-## Signals
-
-| Metric | Attributes |
-|---|---|
-| `runsignal.workload.runs` | `runsignal.workload`, `runsignal.outcome` (`success` / `failure` / `cancelled`), `error.type` |
-| `runsignal.workload.duration` (s) | `runsignal.workload`, `runsignal.outcome` |
-| `runsignal.workload.items` | `runsignal.workload`, `runsignal.item.result` (`processed` / `failed`) |
-| `runsignal.workload.heartbeats` | `runsignal.workload` |
-| `runsignal.workload.since_success` (s) | `runsignal.workload` |
-| `runsignal.workload.since_heartbeat` (s) | `runsignal.workload` |
-
-Each run is also an `INTERNAL` span named after the workload. RunSignal never evaluates alerts in-process,
-because a process that has died cannot report that it is missing. The backend alerts on these signals instead.
-
-The two `since_*` gauges report how long ago the last success or heartbeat happened. Until the first one,
-they count from when the workload was registered. Without them, a job that never runs would never report
-anything, and backends can only notice that a signal stopped if it reported at least once. With them, a job that
-never starts still looks overdue. The full contract is in [spec/README.md](spec/README.md).
-
-## Performance
-
-Measured with BenchmarkDotNet on .NET 10 (Apple Silicon); run them with
-`dotnet run -c Release --project benchmarks/RunSignal.Benchmarks`.
-
-| Operation | Time | Allocated |
+| Language | Monitored with no code in the jobs | Also |
 |---|---|---|
-| `Start()` + `Succeed()` | ~35–40 ns | 0 B |
-| `RunAsync` (synchronously completing work) | ~42 ns | 0 B |
-| `Processed()` | ~1–6 ns | 0 B |
-| `Beat()` | ~14 ns | 0 B |
+| .NET | Hangfire 1.8+, Quartz.NET 3 and 4 | `BackgroundService` heartbeats, keyed DI |
+| Java | Spring `@Scheduled`, Spring Batch 5 and 6 (Spring Boot 3.2+ and 4) | expectations in `application.yml` |
+| Go | robfig/cron | `context` cancellation, panic handling |
+| Node.js | BullMQ processors and job schedulers | `AbortSignal` cancellation |
+| Rust | | sync and async runs; a dropped future is a cancelled run |
 
-The times include a metrics listener but not the exporter's own aggregation, which the OpenTelemetry SDK adds
-on top. Spans allocate only when a tracer samples them.
+Scheduler integrations also register jobs as workloads **at startup**, with their cron schedules, so a job
+that never fires still gets a `missed` alert.
 
-## New Relic
+## Alerts
 
-### 1. Export the signals
+| Alert | Fires when | New Relic | Prometheus |
+|---|---|---|---|
+| `missed` | No success for longer than the longest gap in the schedule plus grace (`maxDuration`, or 15 minutes) | ✅ | ✅ |
+| `failed` | A run failed (scheduled workloads without a failure-rate threshold) | ✅ | ✅ |
+| `stalled` | No heartbeat for longer than `expectEvery` | ✅ | ✅ |
+| `overrun` | A run took longer than `maxDuration` | ✅ | ✅ (rounded up to a histogram bucket) |
+| `low output` | Successful runs processed fewer than `minProcessed` items on average within an hour | ✅ | ✅ |
+| `failure rate` / `item failure rate` | More than `failureRateThreshold` of runs / items failed within 15 minutes | ✅ | ✅ |
+| `not reporting` | The service sent nothing for 15 minutes (it is down, or never started) | as loss of signal on `missed` / `stalled` | `RunSignalNotReporting` |
 
-Send the signals to New Relic over OTLP with **delta temporality**. With the OpenTelemetry .NET default
-(cumulative), the last value is re-exported every interval, so a stopped workload never looks stopped:
+Every alert kind has fired on a live New Relic account, and every Prometheus rule is covered by
+`promtool test rules`.
 
-```csharp
-builder.Services.AddOpenTelemetry()
-    .ConfigureResource(r => r.AddService("billing-service"))      // must match the manifest's service
-    .WithMetrics(m => m
-        .AddRunSignalInstrumentation()
-        .AddOtlpExporter((exporter, reader) =>
-        {
-            exporter.Endpoint = new Uri("https://otlp.eu01.nr-data.net");  // US: https://otlp.nr-data.net
-            exporter.Headers = $"api-key={licenseKey}";                    // an ingest (license) key
-            reader.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
-        }));
-```
+## Backends
 
-Or set `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta`.
+### New Relic
 
-### 2. Create the notification channels once
+1. **Export** over OTLP to `https://otlp.eu01.nr-data.net:4317` (US: `otlp.nr-data.net`) with an ingest
+   (license) key in the `api-key` header, and **delta temporality**
+   (`OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta`).
+2. **Provision.** `runsignal provision` creates the following, and running it again changes only what changed:
+   - One policy per service and severity (`RunSignal: billing-service (critical)`) with its NRQL conditions.
+   - A workflow per policy, routing incidents to the notification channels you pass with `--channel critical=<channel-id>`. Create the Teams or Slack destination and channel in New Relic first; Slack destinations can only be created in the UI.
+   - A dashboard, `RunSignal: billing-service`, showing runs by outcome, time since each workload's last success and heartbeat, p95 duration, items processed, and failures by error type.
+3. **Ownership.** RunSignal changes and deletes only what it created. Conditions added by hand, and the
+   policies that hold them, are kept. Notification channels are never deleted.
 
-In New Relic, create a Teams or Slack destination and a channel for it (**Alerts → Destinations**), and note
-the channel ID. Slack destinations can only be created in the UI, because they use OAuth.
+To check that every alert reaches you before a real job fails, run the
+[alert drill](samples/RunSignal.Samples.AlertDrill). It breaks one expectation per workload. On New Relic,
+overrun and stalled open within about 5 minutes, the failure rates within about 30 minutes, and low output once
+its hour closes.
 
-### 3. Provision from CI
+### Prometheus and Grafana
 
-```bash
-dotnet tool install -g RunSignal.Cli
-
-RUNSIGNAL_MANIFEST_PATH=runsignal.json dotnet run      # or take the manifest from a test run
-export NEW_RELIC_API_KEY=NRAK-...                       # a User API key
-
-runsignal plan runsignal.json                           # offline: what alerts this produces
-runsignal diff runsignal.json --account-id 1234567 --region EU --channel critical=<teams-channel-id>
-runsignal provision runsignal.json --account-id 1234567 --region EU \
-    --channel critical=<teams-channel-id> --channel warning=<slack-channel-id>
-```
-
-`provision` creates one policy per service and severity (`RunSignal: billing-service (critical)`), its NRQL
-conditions, and a workflow that sends that policy's incidents to the given channels. It also creates a
-dashboard, `RunSignal: billing-service`, which is the place to look when an alert fires. The dashboard shows:
-
-- runs by outcome
-- every workload's time since its last success and since its last heartbeat
-- p95 duration
-- items processed
-- failures by error type
-
-Pass `--no-dashboard` to skip it. It is idempotent: running
-it again changes only what changed in the manifest. It deletes conditions it created that are no longer in the
-manifest, and never touches conditions it did not create. Policies for `info` get no workflow unless you give
-them a channel.
-
-| Alert | Fires when | From |
-|---|---|---|
-| `missed` | No success for longer than the longest gap in the schedule plus grace (`maxDuration`, or 15 min), or the service stops reporting for 15 min | `schedule` |
-| `failed` | A run fails (only when there is no `failureRateThreshold`) | `schedule` |
-| `stalled` | No heartbeat for `expectEvery`, or the service stops reporting for 15 min | `expectEvery` |
-| `overrun` | A run took longer than `maxDuration` | `maxDuration` |
-| `low output` | Successful runs processed fewer than `minProcessed` items on average within an hour | `minProcessed` |
-| `failure rate` / `item failure rate` | More than `failureRateThreshold` of runs / items failed within 15 min | `failureRateThreshold` |
-
-Schedules are read in UTC unless you pass `--time-zone Europe/Istanbul`. Tune the grace and the reporting
-timeout with `--missed-grace` and `--not-reporting-after` (minutes).
-
-To check that every alert actually reaches you before a real job fails, run the
-[alert drill](samples/RunSignal.Samples.AlertDrill). It is a small service whose workloads break one expectation
-each (overrun, low output, failure rate, stalled). On New Relic, overrun and stalled open within about 5 minutes,
-the failure rates within about 30 minutes, and low output once its one-hour window closes.
-
-To remove everything RunSignal created for a service, including its dashboard, run
-`runsignal destroy --service billing-service --account-id 1234567 [--dry-run]`. It deletes the workflows and
-the conditions RunSignal created, and deletes the policies once they are empty. Conditions you added by hand,
-and the policies that hold them, are kept, and notification channels are never deleted.
-
-## Prometheus and Grafana
-
-Prometheus 3 receives OpenTelemetry metrics directly (`--web.enable-otlp-receiver`). Point the exporter at
-`http://prometheus:9090/api/v1/otlp/v1/metrics` and keep the default cumulative temporality. Then generate
-alerting rules from the same manifests:
+Prometheus 3 receives OTLP directly (`--web.enable-otlp-receiver`, endpoint `/api/v1/otlp/v1/metrics`). Generate
+rules from the same manifests, then load them into Prometheus, Grafana Mimir or any Prometheus-compatible
+ruler:
 
 ```bash
 runsignal export prometheus billing.json payments.json -o runsignal-rules.yml
 ```
 
-Load the file as a Prometheus rule file, or into Grafana Mimir or any Prometheus-compatible ruler. Alertmanager
-routes on the `severity` and `runsignal_alert` labels. The rules use the names Prometheus gives OTLP metrics by
-default: `runsignal_workload_runs_total`, `job` for `service.name`, and so on. They alert on the same conditions
-as New Relic, plus `RunSignalNotReporting` when a workload has reported nothing at all. That also covers a
-workload that is expected but never started. Overrun limits are rounded up to a histogram bucket.
+- **Routing:** Alertmanager routes on the `severity` and `runsignal_alert` labels.
+- **Metric names:** the rules use the names Prometheus gives OTLP metrics by default (`runsignal_workload_runs_total`; `job` is `service.name`).
+- **Thresholds:** the same as for New Relic; both backends share `RunSignal.Alerting`.
 
-The rules are checked with `promtool test rules` ([tests/prometheus](tests/prometheus)) on series shaped like
-real OTLP data. The tests include the first failure of a job, whose counter series did not exist before.
+## CLI
 
-## Building
+`runsignal` is a .NET tool (`src/RunSignal.Cli`). It reads manifests from any SDK.
 
-```bash
-dotnet test
+| Command | What it does |
+|---|---|
+| `plan <manifests>` | Shows the alert conditions, offline. |
+| `diff <manifests> --account-id <id> [--region EU]` | Shows what `provision` would change in New Relic. |
+| `provision <manifests> --account-id <id> [--channel critical=<id>] [--no-dashboard]` | Creates and updates policies, conditions, workflows and the dashboard. |
+| `destroy --service <name> --account-id <id> [--dry-run]` | Removes what RunSignal created for a service. |
+| `export prometheus <manifests> [-o rules.yml]` | Writes Prometheus alerting rules. |
+
+Common options:
+- `--time-zone Europe/Istanbul` sets the time zone schedules run in (default UTC).
+- `--missed-grace` and `--not-reporting-after` set the grace periods, in minutes.
+- `NEW_RELIC_API_KEY` holds the User API key.
+
+Expected errors print one line and exit with code 1.
+
+## Signals and specification
+
+Every SDK emits the same instruments on the meter `RunSignal`:
+
+| Metric | Type | Attributes |
+|---|---|---|
+| `runsignal.workload.runs` | counter | `runsignal.workload`, `runsignal.outcome`, `error.type` (failures) |
+| `runsignal.workload.duration` | histogram (s, buckets from 10 ms to 8 h) | `runsignal.workload`, `runsignal.outcome` |
+| `runsignal.workload.items` | counter | `runsignal.workload`, `runsignal.item.result` |
+| `runsignal.workload.heartbeats` | counter | `runsignal.workload` |
+| `runsignal.workload.since_success` | gauge (s) | `runsignal.workload` |
+| `runsignal.workload.since_heartbeat` | gauge (s) | `runsignal.workload` |
+
+The `since_*` gauges count from registration until the first success or heartbeat. A job that never runs
+therefore still looks overdue, which matters because backends only notice that a signal stopped if it was seen
+at least once. Runs are also recorded as spans.
+
+The contract is in [spec/README.md](spec/README.md). The SDKs are held to it by the shared
+[conformance vectors](spec/conformance), which every SDK's test suite runs:
+- workload naming, including non-ASCII names (`e-Arşiv gönderimi` becomes `e-arsiv-gonderimi`);
+- a scenario whose exact metrics (names, types, units, attributes, values and histogram bounds) every SDK must reproduce;
+- a byte-for-byte identical manifest.
+
+## Performance
+
+Recording a run, an item or a heartbeat does not allocate on the hot path. These numbers were measured on
+Apple Silicon:
+
+| SDK | Run (start + end) | Item / heartbeat | Measured with |
+|---|---|---|---|
+| .NET | ~35–40 ns, 0 B | ~1–14 ns, 0 B | BenchmarkDotNet, metrics listener only |
+| Rust | ~190 ns | ~50 ns | OpenTelemetry SDK attached |
+| Go | ~290–360 ns, 0 allocs | ~110 ns, 0 allocs | OpenTelemetry SDK attached |
+| Node.js | ~0.7 µs | ~0.2–0.3 µs | OpenTelemetry SDK attached |
+
+The rows were measured differently (the .NET numbers exclude the SDK's aggregation), so compare within a row.
+For workloads that run thousands of times per second, turn off the per-run span (`WithoutTracing()`,
+`tracing: false`, `without_tracing()`, `runsignal.tracing=false`).
+
+## Repository layout
+
+```
+spec/                    signal contract, manifest schema, conformance vectors
+src/
+  RunSignal.Core …       .NET SDK and integrations (DotNet, OpenTelemetry, Hangfire, Quartz, Quartz4)
+  RunSignal.Alerting     backend-neutral alert thresholds
+  RunSignal.NewRelic     New Relic alert and dashboard provisioning
+  RunSignal.Prometheus   Prometheus rule generation
+  RunSignal.Cli          the runsignal tool
+  RunSignal.Go           Go SDK (+ rscron)
+  RunSignal.Java         Java SDK (core + Spring Boot starter)
+  RunSignal.Node         Node.js SDK (+ BullMQ)
+  RunSignal.Rust         Rust SDK
+samples/                 .NET worker and alert drill
+tests/                   .NET tests, Quartz 4 tests, Prometheus rule tests
+docs/                    roadmap, .NET guide
 ```
 
-Requires the .NET 8 and .NET 10 SDKs. The libraries target `net8.0`.
+## Building and testing
+
+| Part | Requirements | Command |
+|---|---|---|
+| .NET | .NET 8 and 10 SDKs | `dotnet test` |
+| Prometheus rules | `promtool` | `promtool test rules tests/prometheus/rules.test.yml` |
+| Go | Go 1.26+ | `cd src/RunSignal.Go && go test -race ./...` |
+| Java | Java 17+, Maven | `cd src/RunSignal.Java && mvn install` (Spring Boot 3: `-Dspring-boot.version=3.5.16 -Dbatch=5`) |
+| Node.js | Node.js 20+, `redis-server` | `cd src/RunSignal.Node && npm ci && npm test` |
+| Rust | Rust 1.75+ | `cd src/RunSignal.Rust && cargo test` |
+
+CI runs all of them, and the Java suite runs against Spring Boot 3.2, 3.5 and 4.1.
 
 ## License
 

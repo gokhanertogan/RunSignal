@@ -6,7 +6,7 @@ sync loops, with OpenTelemetry. It emits the same signals and manifest as every 
 [main README](../../README.md) for the concepts and the alerts.
 
 ```bash
-npm install @runsignal/node @opentelemetry/api
+npm install @runsignal/node @opentelemetry/api   # once published; until then, build from source
 ```
 
 Requires Node.js 20 or later. The package is ESM only and ships its own TypeScript types.

@@ -10,8 +10,8 @@ See the [main README](../../README.md) for the concepts and the alerts.
 | `io.github.gokhanertogan.runsignal:runsignal` | Core: workloads, runs, items, heartbeats, manifest. Depends only on `opentelemetry-api`. |
 | `io.github.gokhanertogan.runsignal:runsignal-spring-boot-starter` | Monitors every `@Scheduled` method with no code in your jobs. |
 
-Requires Java 17 or later. The starter is tested against Spring Boot 3.2, 3.5 and 4.1 (Spring Framework 6.1, 6.2
-and 7.0). It relies on the `@Scheduled` observations Spring added in Framework 6.1, so earlier versions are not
+The artifacts are not on Maven Central yet; build them with `mvn install`. Requires Java 17 or later. The starter is tested against Spring Boot 3.2, 3.5 and 4.1 (Spring Framework 6.1, 6.2
+and 7.0; Spring Batch 5.1, 5.2 and 6.0). It relies on the `@Scheduled` observations Spring added in Framework 6.1, so earlier versions are not
 supported.
 
 ## Spring Boot
@@ -41,6 +41,28 @@ runsignal:
 ```
 
 Inject `WorkloadRegistry` for workloads that are not `@Scheduled` methods.
+
+### Spring Batch
+
+Spring Batch jobs are monitored with no code either.
+
+- **Runs:** every job execution is a run of a workload named after the job (`invoiceExport` becomes `invoice-export`). `COMPLETED` is a success, `FAILED` is a failure with the job's first exception (or its exit code), and `STOPPED` and `ABANDONED` are cancelled.
+- **Items:** items written by the job's steps count as processed, and skipped items as failed, so `minProcessed` and the item failure rate work out of the box.
+- **Registration:** jobs are registered as workloads at startup.
+- **Versions:** Spring Batch 6 moved its types to new packages. The starter works with Spring Batch 5 and 6 through reflection, with a few reflective calls per job execution, and is tested with both.
+
+Set expectations for jobs, or for any workload, in configuration. These take precedence over `@RunSignal`, so
+they can differ per environment:
+
+```yaml
+runsignal:
+  workloads:
+    invoice-export:
+      schedule: "0 0 2 * * *"
+      max-duration: 30m
+      min-processed: 100
+      severity: critical
+```
 
 ## Core API
 
