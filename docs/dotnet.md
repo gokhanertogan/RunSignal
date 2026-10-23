@@ -1,7 +1,22 @@
 # RunSignal for .NET
 
-The .NET packages target `net8.0` (`RunSignal.Quartz4`: `net10.0`). See the [main README](../README.md) for the
+Alerts for .NET background work that no HTTP status code describes: Hangfire and Quartz.NET jobs,
+`BackgroundService` loops and consumers. RunSignal records runs, items and heartbeats as OpenTelemetry metrics,
+with the same names as every other RunSignal SDK. The `runsignal` CLI turns them into New Relic alerts and
+dashboards or Prometheus rules. The [main README](https://github.com/gokhanertogan/RunSignal#readme) covers the
 concepts, the alerts and the backends.
+
+## Installation
+
+```bash
+dotnet add package RunSignal.DotNet           # registry, dependency injection, manifest
+dotnet add package RunSignal.OpenTelemetry    # AddRunSignalInstrumentation()
+dotnet add package RunSignal.Hangfire         # optional: Hangfire 1.8+
+dotnet add package RunSignal.Quartz           # optional: Quartz.NET 3 (RunSignal.Quartz4 for Quartz.NET 4)
+dotnet tool install -g RunSignal.Cli          # the runsignal CLI, for CI
+```
+
+The packages target `net8.0`; `RunSignal.Quartz4` targets `net10.0`, like Quartz.NET 4.
 
 | Package | Purpose |
 |---|---|
@@ -139,6 +154,26 @@ The service name defaults to `OTEL_SERVICE_NAME`, then the entry assembly name, 
 `service.name` the signals are exported with. Without dependency injection, call
 `registry.CreateManifest("billing-service").ToJson()`.
 
+## Exporting
+
+**New Relic** needs delta temporality. With cumulative, a stopped workload never looks stopped:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("billing-service"))      // must match the manifest's service
+    .WithMetrics(m => m
+        .AddRunSignalInstrumentation()
+        .AddOtlpExporter((exporter, reader) =>
+        {
+            exporter.Endpoint = new Uri("https://otlp.eu01.nr-data.net");  // US: https://otlp.nr-data.net
+            exporter.Headers = $"api-key={licenseKey}";                    // an ingest (license) key
+            reader.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
+        }));
+```
+
+**Prometheus 3** receives OTLP at `/api/v1/otlp/v1/metrics` with the default (cumulative) temporality. Generate
+its rules with `runsignal export prometheus`.
+
 ## Performance
 
 Measured with BenchmarkDotNet on .NET 10 (Apple Silicon), with a metrics listener but without the
@@ -155,5 +190,10 @@ Spans allocate only when a tracer samples them.
 
 ## Samples
 
-- [samples/RunSignal.Samples.Worker](../samples/RunSignal.Samples.Worker) prints the signals to the console. It sends them to New Relic when `NEW_RELIC_LICENSE_KEY` is set, and to any OTLP/HTTP endpoint when `RUNSIGNAL_OTLP_ENDPOINT` is set.
-- [samples/RunSignal.Samples.AlertDrill](../samples/RunSignal.Samples.AlertDrill) breaks one expectation per workload to check every alert end to end.
+- [samples/RunSignal.Samples.Worker](https://github.com/gokhanertogan/RunSignal/tree/main/samples/RunSignal.Samples.Worker) prints the signals to the console. It sends them to New Relic when `NEW_RELIC_LICENSE_KEY` is set, and to any OTLP/HTTP endpoint when `RUNSIGNAL_OTLP_ENDPOINT` is set.
+- [samples/RunSignal.Samples.AlertDrill](https://github.com/gokhanertogan/RunSignal/tree/main/samples/RunSignal.Samples.AlertDrill) breaks one expectation per workload to check every alert end to end.
+
+## Links
+
+[Specification](https://github.com/gokhanertogan/RunSignal/blob/main/spec/README.md) · [Changelog](https://github.com/gokhanertogan/RunSignal/blob/main/CHANGELOG.md) ·
+[Other languages](https://github.com/gokhanertogan/RunSignal#quick-start)

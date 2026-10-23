@@ -32,7 +32,9 @@
   </PropertyGroup>
 
   <ItemGroup Condition="$(MSBuildProjectDirectory.Contains('$([System.IO.Path]::DirectorySeparatorChar)src$([System.IO.Path]::DirectorySeparatorChar)'))">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <!-- nuget.org shows the package README without the repository around it, so packages carry the .NET guide,
+         whose links are absolute. -->
+    <None Include="$(MSBuildThisFileDirectory)docs/dotnet.md" Pack="true" PackagePath="\README.md" />
   </ItemGroup>
 
 </Project>

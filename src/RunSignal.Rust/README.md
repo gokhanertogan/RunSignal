@@ -1,19 +1,21 @@
 # RunSignal for Rust
 
-Monitor Rust background work that no HTTP status code describes, such as scheduled jobs, consumers, data
-pipelines and long-lived daemons, with OpenTelemetry. It emits the same signals and manifest as every other
-RunSignal SDK, so the `runsignal` CLI provisions the same New Relic alerts for Rust services as for .NET, Go,
-Java and Node.js ones. See the [main README](../../README.md) for the concepts and the alerts.
+Alerts for Rust background work that no HTTP status code describes: scheduled jobs, consumers, data pipelines
+and long-lived daemons. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same names
+as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Rust services as for .NET, Go,
+Java and Node.js ones. The [main README](https://github.com/gokhanertogan/RunSignal#readme) covers the concepts,
+the alerts and the backends.
 
-```toml
-[dependencies]
-runsignal = { git = "https://github.com/gokhanertogan/RunSignal" }
+## Installation
+
+```bash
+cargo add runsignal
 ```
 
-The minimum supported Rust version is 1.75, the same as `opentelemetry` 0.33. The only dependencies are
-`opentelemetry` (API only) and `unicode-normalization`.
+The minimum supported Rust version is 1.75, the same as `opentelemetry` 0.33. The only dependencies are the
+`opentelemetry` API and `unicode-normalization`.
 
-## Usage
+## Quick start
 
 ```rust
 use std::time::Duration;
@@ -26,7 +28,6 @@ let invoices = registry.workload("nightly-invoice", Options::new()
     .min_processed(100)
     .severity(Severity::Critical))?;
 
-// One run: succeeds on Ok, fails on Err. The result passes through.
 invoices.run(|| {
     for order in unbilled_orders()? {
         create_invoice(&order)?;
@@ -34,25 +35,35 @@ invoices.run(|| {
     }
     Ok::<_, anyhow::Error>(())
 })?;
-
-// Async: a future dropped before it completes (shutdown, timeout) records a cancelled run.
-invoices.run_async(async { generate().await }).await?;
 ```
 
-A long-running loop sends heartbeats with `workload.beat()`. A manual run is started with `workload.start()`
-and ended with `succeed()`, `fail(&err)`, `fail_code("statement_missing", "...")` or `cancel()`. Each takes the
-run by value, so a run cannot be recorded twice.
+`Registry::global()` reads the global meter provider on first use, not when it is created: a meter taken before
+`global::set_meter_provider` stays a no-op for good. So create registries freely, but record only after the
+SDK is set up. `Registry::with_meter(meter)` takes an explicit meter.
 
-- **Error types:** `error.type` is the compiler's name for the error type (`std::any::type_name`), which can change between Rust versions. For example, `std::io::Error` is reported as `core::io::error::Error` since Rust 1.9x. Use `fail_code` when dashboards or alerts filter on specific errors. The `failed` and failure-rate alerts do not depend on it.
-- **Global provider:** `Registry::global()` reads the global meter provider on first use, not when it is created. A meter taken before `global::set_meter_provider` stays a no-op for good, so create registries freely but record only after the SDK is set up. `Registry::with_meter(meter)` takes an explicit meter.
-- **Tracing:** for workloads that run thousands of times per second, use `Registry::global().without_tracing()`.
+## Recording work
 
-Write the manifest with `registry.write_manifest_from_env(Some("billing-service"))?` once every workload is
-registered. It writes to `RUNSIGNAL_MANIFEST_PATH` when that is set.
+| Call | Records |
+|---|---|
+| `w.run(\|\| ...)` | One run. It succeeds on `Ok` and fails on `Err`; the result passes through. The run's span is current inside. |
+| `w.run_async(future).await` | The same for async work. A future dropped before it completes (shutdown, timeout) records a cancelled run. |
+| `let run = w.start()` then `run.succeed()` / `fail(&err)` / `fail_code(code, msg)` / `cancel()` | A run ended by hand. Each takes the run by value, so it cannot be recorded twice. |
+| `w.processed(n)` / `w.item_failed(n)` | Items handled. |
+| `w.beat()` | A heartbeat from a long-running loop. |
 
-### Exporting to New Relic
+`error.type` is the compiler's name for the error type (`std::any::type_name`), which can change between Rust
+versions: `std::io::Error` is reported as `core::io::error::Error` since Rust 1.9x. Use `fail_code` when
+dashboards or alerts filter on specific errors. The `failed` and failure-rate alerts do not depend on it.
 
-Use delta temporality. With cumulative, a stopped workload never looks stopped:
+## Manifest
+
+```rust
+registry.write_manifest_from_env(Some("billing-service"))?; // writes to RUNSIGNAL_MANIFEST_PATH when it is set
+```
+
+## Exporting
+
+**New Relic** needs delta temporality. With cumulative, a stopped workload never looks stopped:
 
 ```rust
 let exporter = opentelemetry_otlp::MetricExporter::builder()
@@ -63,14 +74,28 @@ let exporter = opentelemetry_otlp::MetricExporter::builder()
     .build()?;
 ```
 
-A complete program is in [examples/worker.rs](examples/worker.rs): `cargo run --example worker`.
+**Prometheus 3** receives OTLP at `/api/v1/otlp/v1/metrics` with the default (cumulative) temporality. Generate
+its rules with `runsignal export prometheus`.
+
+A complete program is in
+[examples/worker.rs](https://github.com/gokhanertogan/RunSignal/blob/main/src/RunSignal.Rust/examples/worker.rs):
+`cargo run --example worker`.
 
 ## Performance
 
-Measured on Apple Silicon with Rust 1.99 and the OpenTelemetry SDK attached. The times include the SDK's
-aggregation. Run with `cargo run --release --example bench`.
+Measured on Apple Silicon with Rust 1.99 and the OpenTelemetry SDK attached; the times include its aggregation.
+Run `cargo run --release --example bench`.
 
 | Operation | Time |
 |---|---|
 | `start()` + `succeed()` without tracing | ~190 ns |
 | `processed()` / `beat()` | ~50 ns |
+
+For workloads that run thousands of times per second, use `Registry::global().without_tracing()`.
+
+## Links
+
+[Specification](https://github.com/gokhanertogan/RunSignal/blob/main/spec/README.md) ·
+[Changelog](https://github.com/gokhanertogan/RunSignal/blob/main/CHANGELOG.md) ·
+[Other languages](https://github.com/gokhanertogan/RunSignal#quick-start) ·
+[docs.rs](https://docs.rs/runsignal)

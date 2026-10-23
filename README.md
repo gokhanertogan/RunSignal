@@ -15,13 +15,25 @@ names in .NET, Go, Java, Node.js and Rust. From a manifest of what each job is e
 the alerts and dashboards** in your observability backend: missed, failed, overrun, stalled, low output and
 failure rate.
 
-> **Status: pre-release.** Everything below works and is tested, including end to end against a live New Relic
-> account and a local Prometheus. The packages are not published to NuGet, npm, Maven Central or crates.io yet,
-> so for now you build them from source. Teams and Slack routing is implemented but not yet verified end to end.
-> See the [roadmap](docs/ROADMAP.md).
+> **Status: 0.1.** Everything below works and is tested, including end to end against a live New Relic account
+> and a local Prometheus. Until 1.0, minor versions may contain breaking changes. Teams and Slack routing is
+> implemented but not yet verified end to end. See the [roadmap](docs/ROADMAP.md) and the
+> [changelog](CHANGELOG.md).
+
+## Installation
+
+| Language | Package | Install |
+|---|---|---|
+| .NET | [`RunSignal.DotNet`](https://www.nuget.org/packages/RunSignal.DotNet) and integrations | `dotnet add package RunSignal.DotNet` |
+| Go | [`github.com/gokhanertogan/RunSignal/go`](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go) | `go get github.com/gokhanertogan/RunSignal/go` |
+| Java | [`io.github.gokhanertogan.runsignal`](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal) | `runsignal-spring-boot-starter` or `runsignal`, version `0.1.0` |
+| Node.js | [`@runsignal/node`](https://www.npmjs.com/package/@runsignal/node) | `npm install @runsignal/node @opentelemetry/api` |
+| Rust | [`runsignal`](https://crates.io/crates/runsignal) | `cargo add runsignal` |
+| CLI | [`RunSignal.Cli`](https://www.nuget.org/packages/RunSignal.Cli) | `dotnet tool install -g RunSignal.Cli` |
 
 ## Contents
 
+- [Installation](#installation)
 - [How it works](#how-it-works)
 - [Concepts](#concepts)
 - [Quick start](#quick-start)

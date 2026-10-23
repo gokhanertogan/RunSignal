@@ -1,28 +1,31 @@
 # RunSignal for Go
 
-Monitor Go background work that no HTTP status code describes, such as cron jobs, Kubernetes CronJobs, queue
-consumers and sync loops, with OpenTelemetry. It emits the same signals and manifest as every other RunSignal
-SDK, so the `runsignal` CLI provisions the same New Relic alerts for Go services as for .NET ones. See the
-[main README](../../README.md) for the concepts and the alerts.
+Alerts for Go background work that no HTTP status code describes: cron jobs, Kubernetes CronJobs, queue
+consumers and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same
+names as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Go services as for
+.NET, Java, Node.js and Rust ones. The [main README](../README.md) covers the concepts, the alerts and the
+backends.
+
+## Installation
 
 ```bash
 go get github.com/gokhanertogan/RunSignal/go
 ```
 
-Requires Go 1.26 or later, because OpenTelemetry Go requires it.
+Requires Go 1.26 or later, the minimum of OpenTelemetry Go. The only dependencies are the OpenTelemetry API,
+`golang.org/x/text` and, for `rscron`, `github.com/robfig/cron/v3`.
 
-## Usage
+## Quick start
 
 ```go
-reg := runsignal.Default // records on the global OpenTelemetry providers
+import "github.com/gokhanertogan/RunSignal/go"
 
-invoices := reg.MustWorkload("nightly-invoice",
+invoices := runsignal.Default.MustWorkload("nightly-invoice",
 	runsignal.Schedule("0 2 * * *"),
 	runsignal.MaxDuration(30*time.Minute),
 	runsignal.MinProcessed(100),
 	runsignal.WithSeverity(runsignal.Critical))
 
-// One run: succeeds on nil, is cancelled if ctx was cancelled, fails otherwise (panics fail and re-panic).
 err := invoices.Run(ctx, func(ctx context.Context) error {
 	for _, order := range orders {
 		if err := createInvoice(ctx, order); err != nil {
@@ -34,33 +37,22 @@ err := invoices.Run(ctx, func(ctx context.Context) error {
 })
 ```
 
-A long-running loop sends heartbeats, so a loop that is alive but stuck is noticed:
+`runsignal.Default` records on the global OpenTelemetry providers, which forward to the SDK whenever it is
+set up. For explicit providers, use `runsignal.NewRegistry(runsignal.WithMeterProvider(mp))`.
 
-```go
-sync := reg.MustWorkload("stock-sync", runsignal.ExpectEvery(5*time.Minute))
-for ctx.Err() == nil {
-	syncStock(ctx)
-	sync.Beat(ctx)
-	time.Sleep(time.Minute)
-}
-```
+## Recording work
 
-Manual runs, and failures without an error value:
+| Call | Records |
+|---|---|
+| `w.Run(ctx, fn)` | One run. It succeeds on `nil`, is cancelled when `ctx` was cancelled, and fails otherwise. A panic fails the run and is re-raised. |
+| `ctx, run := w.Start(ctx)` then `run.Succeed()` / `Fail(err)` / `FailCode(code, msg)` / `Cancel()` | A run ended by hand. |
+| `w.Processed(ctx, n)` / `w.ItemFailed(ctx, n)` | Items handled. |
+| `w.Beat(ctx)` | A heartbeat from a long-running loop. |
 
-```go
-ctx, run := imports.Start(ctx)
-file, ok := fetchStatement(ctx)
-if !ok {
-	run.FailCode("statement_missing", "no bank statement today")
-	return
-}
-run.Succeed()
-```
+`error.type` is the error's Go type, such as `*fs.PathError`, looking through `fmt.Errorf("...: %w")` wrapping.
+Implement `ErrorType() string` on an error to supply a stable code instead.
 
-`error.type` is the error's Go type, such as `*fs.PathError`, with `fmt.Errorf("...: %w")` wrapping looked
-through. Implement `ErrorType() string` on an error to supply a stable code instead.
-
-### robfig/cron
+## robfig/cron
 
 ```go
 c := cron.New()
@@ -73,10 +65,10 @@ c.Start()
 Every run is recorded, and the cron spec becomes the workload's schedule, so a job that never fires gets a
 `missed` alert. `rscron.Wrap` returns a `cron.JobWrapper` for existing `cron.Job`s.
 
-### Manifest
+## Manifest
 
-Write the manifest once every workload is registered. With `RUNSIGNAL_MANIFEST_PATH` set it is written there;
-otherwise nothing happens:
+Once every workload is registered, write the manifest for `runsignal provision`. It is written only when
+`RUNSIGNAL_MANIFEST_PATH` is set:
 
 ```go
 if _, err := runsignal.Default.WriteManifestFromEnv("billing-service"); err != nil {
@@ -84,9 +76,9 @@ if _, err := runsignal.Default.WriteManifestFromEnv("billing-service"); err != n
 }
 ```
 
-### Exporting to New Relic
+## Exporting
 
-Use delta temporality. With cumulative, a stopped workload never looks stopped:
+**New Relic** needs delta temporality. With cumulative, a stopped workload never looks stopped:
 
 ```go
 exporter, _ := otlpmetricgrpc.New(ctx,
@@ -95,20 +87,26 @@ exporter, _ := otlpmetricgrpc.New(ctx,
 	otlpmetricgrpc.WithTemporalitySelector(sdkmetric.DeltaTemporalitySelector))
 ```
 
+**Prometheus 3** receives OTLP at `/api/v1/otlp/v1/metrics` with the default (cumulative) temporality. Generate
+its rules with `runsignal export prometheus`.
+
 A complete program is in [examples/worker](examples/worker).
 
 ## Performance
 
-Measured on Apple Silicon with Go 1.27 and the OpenTelemetry SDK attached. The times include the SDK's own
-aggregation. Run the benchmarks with `go test -bench . -run ^$`.
+Measured on Apple Silicon with Go 1.27 and the OpenTelemetry SDK attached; the times include its aggregation.
+Run `go test -bench . -run ^$`.
 
 | Operation | Time | Allocations |
 |---|---|---|
-| `Start` + `Succeed` | ~360 ns | 0 |
 | `Run` | ~290 ns | 0 |
+| `Start` + `Succeed` | ~360 ns | 0 |
 | `Processed` / `Beat` | ~110 ns | 0 |
-| `Start` + `Succeed` with the global tracer | ~400 ns | 3 (inside OpenTelemetry) |
+| `Start` + `Succeed` with the global tracer | ~400 ns | 3, inside OpenTelemetry |
 
-The global tracer allocates a span and a context per run even when nothing records them. For workloads that
-run thousands of times per second, such as per-message consumers, create the registry with
-`runsignal.NewRegistry(runsignal.WithoutTracing())`.
+For workloads that run thousands of times per second, create the registry with `runsignal.WithoutTracing()`.
+
+## Links
+
+[Specification](../spec/README.md) · [Changelog](../CHANGELOG.md) · [Other languages](../README.md#quick-start) ·
+[pkg.go.dev](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go)
