@@ -58,4 +58,35 @@ public class PrometheusTests
 
         Assert.Contains("job=\"it''s \\\"quoted\\\"\"", rules); // PromQL escapes the double quotes, YAML doubles the single quote
     }
+
+    [Fact]
+    public void Grafana_dashboard_selects_the_manifest_services_and_queries_the_rule_metrics()
+    {
+        var manifest = WorkloadManifest.FromJson(File.ReadAllText(Fixture("manifest.json")));
+
+        var json = GrafanaDashboard.Generate([manifest, manifest]);
+
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal($"RunSignal: {manifest.Service}", root.GetProperty("title").GetString());
+        Assert.Equal(json, GrafanaDashboard.Generate([manifest])); // duplicates collapse, and the uid is stable
+        var job = root.GetProperty("templating").GetProperty("list").EnumerateArray().Single(v => v.GetProperty("name").GetString() == "job");
+        Assert.Equal([manifest.Service], job.GetProperty("current").GetProperty("value").EnumerateArray().Select(v => v.GetString()!));
+
+        var expressions = root.GetProperty("panels").EnumerateArray()
+            .Select(p => p.GetProperty("targets")[0].GetProperty("expr").GetString()!).ToList();
+        Assert.Equal(8, expressions.Count);
+        foreach (var metric in new[] { "runsignal_workload_runs_total", "runsignal_workload_items_total", "runsignal_workload_duration_seconds_bucket",
+                     "runsignal_workload_since_success_seconds", "runsignal_workload_since_heartbeat_seconds", "ALERTS" })
+            Assert.Contains(expressions, e => e.Contains(metric, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Grafana_dashboard_without_manifests_shows_every_service()
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(GrafanaDashboard.Generate([]));
+
+        Assert.Equal("runsignal", document.RootElement.GetProperty("uid").GetString());
+        Assert.Equal("RunSignal", document.RootElement.GetProperty("title").GetString());
+    }
 }

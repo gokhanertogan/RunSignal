@@ -147,7 +147,35 @@ internal static class RunSignalCli
             }
             return 0;
         }));
-        var export = new Command("export", "Write alert rules for backends RunSignal does not provision directly.") { prometheus };
+        var optionalManifests = new Argument<FileInfo[]>("manifests")
+        {
+            Description = "Workload manifests whose services the dashboard selects by default. Without any, it shows every service that reports.",
+            Arity = ArgumentArity.ZeroOrMore,
+        };
+        var grafana = new Command("grafana", "Write a Grafana dashboard for RunSignal metrics in Prometheus, to import or provision in Grafana.")
+        {
+            optionalManifests, outputFile,
+        };
+        grafana.SetAction(Guarded(async (result, ct) =>
+        {
+            var loaded = new List<WorkloadManifest>();
+            foreach (var manifestFile in result.GetValue(optionalManifests) ?? [])
+                loaded.Add(WorkloadManifest.FromJson(await File.ReadAllTextAsync(manifestFile.FullName, ct).ConfigureAwait(false)));
+
+            var dashboard = RunSignal.Prometheus.GrafanaDashboard.Generate(loaded);
+            if (result.GetValue(outputFile) is { } file)
+            {
+                await File.WriteAllTextAsync(file.FullName, dashboard, ct).ConfigureAwait(false);
+                await output.WriteLineAsync($"Wrote the Grafana dashboard to {file.FullName}.").ConfigureAwait(false);
+            }
+            else
+            {
+                await output.WriteAsync(dashboard).ConfigureAwait(false);
+            }
+            return 0;
+        }));
+
+        var export = new Command("export", "Write alert rules and dashboards for backends RunSignal does not provision directly.") { prometheus, grafana };
 
         var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision, destroy, export };
         return await root.Parse(args).InvokeAsync().ConfigureAwait(false);

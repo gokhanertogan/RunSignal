@@ -1,5 +1,10 @@
 # RunSignal for Java
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.gokhanertogan.runsignal/runsignal)](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal)
+
+**Spring Boot `@Scheduled` and Spring Batch monitoring, on OpenTelemetry.** Get an alert when a scheduled job is
+missed, fails, overruns or processes nothing, with no code in your jobs.
+
 Alerts for Java background work that no HTTP status code describes: Spring `@Scheduled` jobs, Spring Batch jobs,
 consumers and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same
 names as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Java services as for
@@ -17,12 +22,12 @@ backends.
 <dependency>
   <groupId>io.github.gokhanertogan.runsignal</groupId>
   <artifactId>runsignal-spring-boot-starter</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
 ```kotlin
-implementation("io.github.gokhanertogan.runsignal:runsignal-spring-boot-starter:0.1.0") // Gradle
+implementation("io.github.gokhanertogan.runsignal:runsignal-spring-boot-starter:0.2.0") // Gradle
 ```
 
 Requires Java 17 or later. The starter is tested against Spring Boot 3.2, 3.5 and 4.1 (Spring Framework 6.1, 6.2

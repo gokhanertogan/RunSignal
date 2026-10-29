@@ -1,6 +1,18 @@
 # RunSignal
 
-**Cross-language workload observability and alert provisioning.**
+[![CI](https://github.com/gokhanertogan/RunSignal/actions/workflows/ci.yml/badge.svg)](https://github.com/gokhanertogan/RunSignal/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/RunSignal.DotNet?label=nuget)](https://www.nuget.org/packages/RunSignal.DotNet)
+[![npm](https://img.shields.io/npm/v/@runsignal/node?label=npm)](https://www.npmjs.com/package/@runsignal/node)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.gokhanertogan.runsignal/runsignal?label=maven)](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal)
+[![PyPI](https://img.shields.io/pypi/v/runsignal?label=pypi)](https://pypi.org/project/runsignal/)
+[![crates.io](https://img.shields.io/crates/v/runsignal)](https://crates.io/crates/runsignal)
+[![Go Reference](https://pkg.go.dev/badge/github.com/gokhanertogan/RunSignal/go.svg)](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+**Cron job and background job monitoring on OpenTelemetry, with alerts as code.** Get alerted when a scheduled job
+is missed, fails, runs too long or processes nothing, and when a queue consumer or worker loop stalls. One signal
+model for .NET, Go, Java, Node.js, Python and Rust; alerts and dashboards for New Relic, Prometheus and Grafana.
+No hosted service and no ping URLs: the alerts live in the backend you already use.
 
 Your APM alerts on HTTP 500s and slow endpoints. The failures that hurt most often happen where there is no
 HTTP request at all:
@@ -11,9 +23,9 @@ HTTP request at all:
 - A background loop is deadlocked, and its exception was swallowed in a `catch`.
 
 RunSignal records the **runs, items and heartbeats** of background work as OpenTelemetry metrics, with the same
-names in .NET, Go, Java, Node.js and Rust. From a manifest of what each job is expected to do, it **provisions
-the alerts and dashboards** in your observability backend: missed, failed, overrun, stalled, low output and
-failure rate.
+names in .NET, Go, Java, Node.js, Python and Rust. From a manifest of what each job is expected to do, it
+**provisions the alerts and dashboards** in your observability backend: missed, failed, overrun, stalled, low
+output and failure rate.
 
 > **Status: 0.1.** Everything below works and is tested, including end to end against a live New Relic account
 > and a local Prometheus. Until 1.0, minor versions may contain breaking changes. Teams and Slack routing is
@@ -26,10 +38,26 @@ failure rate.
 |---|---|---|
 | .NET | [`RunSignal.DotNet`](https://www.nuget.org/packages/RunSignal.DotNet) and integrations | `dotnet add package RunSignal.DotNet` |
 | Go | [`github.com/gokhanertogan/RunSignal/go`](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go) | `go get github.com/gokhanertogan/RunSignal/go` |
-| Java | [`io.github.gokhanertogan.runsignal`](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal) | `runsignal-spring-boot-starter` or `runsignal`, version `0.1.0` |
+| Java | [`io.github.gokhanertogan.runsignal`](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal) | `runsignal-spring-boot-starter` or `runsignal`, version `0.2.0` |
 | Node.js | [`@runsignal/node`](https://www.npmjs.com/package/@runsignal/node) | `npm install @runsignal/node @opentelemetry/api` |
+| Python | [`runsignal`](https://pypi.org/project/runsignal/) | `pip install runsignal` |
 | Rust | [`runsignal`](https://crates.io/crates/runsignal) | `cargo add runsignal` |
 | CLI | [`RunSignal.Cli`](https://www.nuget.org/packages/RunSignal.Cli) | `dotnet tool install -g RunSignal.Cli` |
+
+## Why RunSignal
+
+| | Ping-based cron monitors (Healthchecks.io, Cronitor, Sentry Crons) | RunSignal |
+|---|---|---|
+| How it works | Each job pings a monitoring service | Jobs emit OpenTelemetry metrics to the backend you already use |
+| Missed, failed and overrunning runs | ✅ | ✅ |
+| Stalled consumers and loops | ✅ with heartbeat pings | ✅ with heartbeats |
+| "Succeeded, but processed 0 rows" | rarely | ✅ `minProcessed` |
+| Failure rate across many runs, by error type | rarely | ✅ |
+| Where alerts are defined | the service's UI, API or SDK | generated in CI from the manifest the application writes |
+| Where data and alerts live | the monitoring service | your New Relic or Prometheus |
+
+Use RunSignal if you already run OpenTelemetry with New Relic or Prometheus and want your jobs alerted on
+like your HTTP endpoints, without another SaaS and without pinging a URL from every job.
 
 ## Contents
 
@@ -38,6 +66,7 @@ failure rate.
 - [Concepts](#concepts)
 - [Quick start](#quick-start)
 - [Integrations](#integrations)
+- [GitHub Actions](#github-actions)
 - [Alerts](#alerts)
 - [Backends](#backends): [New Relic](#new-relic), [Prometheus and Grafana](#prometheus-and-grafana)
 - [CLI](#cli)
@@ -50,7 +79,7 @@ failure rate.
 
 ```mermaid
 flowchart LR
-    subgraph app["Your service (.NET, Go, Java, Node.js, Rust)"]
+    subgraph app["Your service (.NET, Go, Java, Node.js, Python, Rust)"]
         jobs["Jobs, consumers, loops"] --> sdk["RunSignal SDK"]
     end
     sdk -- "OTLP metrics" --> backend[("New Relic / Prometheus")]
@@ -181,6 +210,22 @@ More: [src/RunSignal.Node](src/RunSignal.Node)
 </details>
 
 <details>
+<summary>Python</summary>
+
+```python
+invoices = default_registry.workload("nightly-invoice",
+    schedule="0 2 * * *", max_duration="30m", min_processed=100, severity="critical")
+
+with invoices.run():
+    for order in unbilled_orders():
+        create_invoice(order)
+        invoices.processed()
+```
+
+More: [src/RunSignal.Python](src/RunSignal.Python)
+</details>
+
+<details>
 <summary>Rust</summary>
 
 ```rust
@@ -214,7 +259,7 @@ runsignal provision runsignal.json --account-id 1234567 --region EU
 ```
 
 .NET and the Spring Boot starter write the manifest by themselves once the application has started. In Go,
-Node.js and Rust, call `WriteManifestFromEnv` / `writeManifestFromEnv` / `write_manifest_from_env` once your
+Node.js, Python and Rust, call `WriteManifestFromEnv` / `writeManifestFromEnv` / `write_manifest_from_env` once your
 workloads are registered.
 
 ## Integrations
@@ -224,11 +269,30 @@ workloads are registered.
 | .NET | Hangfire 1.8+, Quartz.NET 3 and 4 | `BackgroundService` heartbeats, keyed DI |
 | Java | Spring `@Scheduled`, Spring Batch 5 and 6 (Spring Boot 3.2+ and 4) | expectations in `application.yml` |
 | Go | robfig/cron | `context` cancellation, panic handling |
-| Node.js | BullMQ processors and job schedulers | `AbortSignal` cancellation |
+| Node.js | BullMQ processors and job schedulers; node-cron, croner, cron and node-schedule through `cronJob` | `AbortSignal` cancellation |
+| Python | Celery tasks and Celery beat, APScheduler 3 | `with` / `async with` runs, `@monitor` decorator |
 | Rust | | sync and async runs; a dropped future is a cancelled run |
 
 Scheduler integrations also register jobs as workloads **at startup**, with their cron schedules, so a job
 that never fires still gets a `missed` alert.
+
+## GitHub Actions
+
+Provision alerts on every deploy with the bundled action:
+
+```yaml
+- uses: gokhanertogan/RunSignal@main
+  with:
+    command: provision runsignal.json --account-id 1234567 --region EU
+    new-relic-api-key: ${{ secrets.NEW_RELIC_API_KEY }}
+
+# or, for Prometheus and Grafana:
+- uses: gokhanertogan/RunSignal@main
+  with:
+    command: export prometheus runsignal.json -o deploy/runsignal-rules.yml
+```
+
+The action installs the `runsignal` CLI and runs `command`; any CLI command works.
 
 ## Alerts
 
@@ -272,7 +336,12 @@ ruler:
 
 ```bash
 runsignal export prometheus billing.json payments.json -o runsignal-rules.yml
+runsignal export grafana billing.json payments.json -o runsignal-dashboard.json
 ```
+
+`export grafana` (since 0.2.0) writes a dashboard to import or provision in Grafana: runs by outcome, firing RunSignal
+alerts, p95 duration, time since each workload's last success and heartbeat, items, and failures by error type.
+It has data source, service and workload variables; without manifests it shows every service that reports.
 
 - **Routing:** Alertmanager routes on the `severity` and `runsignal_alert` labels.
 - **Metric names:** the rules use the names Prometheus gives OTLP metrics by default (`runsignal_workload_runs_total`; `job` is `service.name`).
@@ -289,6 +358,7 @@ runsignal export prometheus billing.json payments.json -o runsignal-rules.yml
 | `provision <manifests> --account-id <id> [--channel critical=<id>] [--no-dashboard]` | Creates and updates policies, conditions, workflows and the dashboard. |
 | `destroy --service <name> --account-id <id> [--dry-run]` | Removes what RunSignal created for a service. |
 | `export prometheus <manifests> [-o rules.yml]` | Writes Prometheus alerting rules. |
+| `export grafana [manifests] [-o dashboard.json]` | Writes a Grafana dashboard for the Prometheus metrics. |
 
 Common options:
 - `--time-zone Europe/Istanbul` sets the time zone schedules run in (default UTC).
@@ -329,6 +399,7 @@ Apple Silicon:
 |---|---|---|---|
 | .NET | ~35–40 ns, 0 B | ~1–14 ns, 0 B | BenchmarkDotNet, metrics listener only |
 | Rust | ~190 ns | ~50 ns | OpenTelemetry SDK attached |
+| Python | ~9 µs | ~4 µs | OpenTelemetry SDK attached, no span |
 | Go | ~290–360 ns, 0 allocs | ~110 ns, 0 allocs | OpenTelemetry SDK attached |
 | Node.js | ~0.7 µs | ~0.2–0.3 µs | OpenTelemetry SDK attached |
 
@@ -349,6 +420,7 @@ src/
   RunSignal.Cli          the runsignal tool
   RunSignal.Java         Java SDK (core + Spring Boot starter)
   RunSignal.Node         Node.js SDK (+ BullMQ)
+  RunSignal.Python       Python SDK (+ Celery, APScheduler)
   RunSignal.Rust         Rust SDK
 samples/                 .NET worker and alert drill
 tests/                   .NET tests, Quartz 4 tests, Prometheus rule tests
@@ -364,6 +436,7 @@ docs/                    roadmap, .NET guide
 | Go | Go 1.26+ | `cd go && go test -race ./...` |
 | Java | Java 17+, Maven | `cd src/RunSignal.Java && mvn install` (Spring Boot 3: `-Dspring-boot.version=3.5.16 -Dbatch=5`) |
 | Node.js | Node.js 20+, `redis-server` | `cd src/RunSignal.Node && npm ci && npm test` |
+| Python | Python 3.9+ | `cd src/RunSignal.Python && pip install -e ".[celery,apscheduler]" opentelemetry-sdk pytest && pytest` |
 | Rust | Rust 1.75+ | `cd src/RunSignal.Rust && cargo test` |
 
 CI runs all of them, and the Java suite runs against Spring Boot 3.2, 3.5 and 4.1.

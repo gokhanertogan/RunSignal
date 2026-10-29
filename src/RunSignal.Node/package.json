@@ -1,7 +1,7 @@
 {
   "name": "@runsignal/node",
-  "version": "0.1.0",
-  "description": "Monitor Node.js background work that no HTTP status code describes (scheduled jobs, BullMQ queues, sync loops) with OpenTelemetry, and alert on missed, overrunning, stalled or low-output jobs.",
+  "version": "0.2.0",
+  "description": "Cron job and background job monitoring for Node.js with OpenTelemetry: alert when a scheduled job is missed, fails, overruns or stalls, or a BullMQ queue stops processing. Works with node-cron, croner, cron, node-schedule and BullMQ; alerts for New Relic, Prometheus and Grafana.",
   "license": "MIT",
   "author": "Gokhan Ertogan",
   "repository": {
@@ -10,15 +10,29 @@
     "directory": "src/RunSignal.Node"
   },
   "keywords": [
-    "observability",
+    "cron-monitoring",
+    "cron",
+    "job-monitoring",
+    "background-jobs",
+    "scheduled-jobs",
+    "heartbeat",
+    "dead-mans-switch",
+    "healthcheck",
+    "bullmq",
+    "node-cron",
+    "croner",
+    "node-schedule",
+    "queue-monitoring",
+    "worker",
     "opentelemetry",
+    "otel",
+    "observability",
     "monitoring",
     "alerting",
-    "background-jobs",
-    "cron",
-    "heartbeat",
-    "bullmq",
-    "newrelic"
+    "prometheus",
+    "grafana",
+    "newrelic",
+    "typescript"
   ],
   "type": "module",
   "engines": {
@@ -32,6 +46,10 @@
     "./bullmq": {
       "types": "./dist/bullmq.d.ts",
       "default": "./dist/bullmq.js"
+    },
+    "./cron": {
+      "types": "./dist/cron.d.ts",
+      "default": "./dist/cron.js"
     }
   },
   "files": [

@@ -1,5 +1,11 @@
 # RunSignal for Rust
 
+[![crates.io](https://img.shields.io/crates/v/runsignal)](https://crates.io/crates/runsignal)
+[![docs.rs](https://img.shields.io/docsrs/runsignal)](https://docs.rs/runsignal)
+
+**Cron job and background job monitoring for Rust, on OpenTelemetry.** Get an alert when a scheduled job is
+missed, fails or overruns, or when a tokio task, consumer or daemon stops making progress.
+
 Alerts for Rust background work that no HTTP status code describes: scheduled jobs, consumers, data pipelines
 and long-lived daemons. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same names
 as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Rust services as for .NET, Go,

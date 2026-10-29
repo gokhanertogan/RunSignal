@@ -1,10 +1,15 @@
 # RunSignal for .NET
 
+[![NuGet](https://img.shields.io/nuget/v/RunSignal.DotNet)](https://www.nuget.org/packages/RunSignal.DotNet)
+
+**Hangfire, Quartz.NET and BackgroundService monitoring, on OpenTelemetry.** Get an alert when a recurring job
+is missed, fails, overruns or processes nothing, or when a worker loop stalls, with no code in your jobs.
+
 Alerts for .NET background work that no HTTP status code describes: Hangfire and Quartz.NET jobs,
 `BackgroundService` loops and consumers. RunSignal records runs, items and heartbeats as OpenTelemetry metrics,
 with the same names as every other RunSignal SDK. The `runsignal` CLI turns them into New Relic alerts and
-dashboards or Prometheus rules. The [main README](https://github.com/gokhanertogan/RunSignal#readme) covers the
-concepts, the alerts and the backends.
+dashboards, or Prometheus rules and a Grafana dashboard. The
+[main README](https://github.com/gokhanertogan/RunSignal#readme) covers the concepts, the alerts and the backends.
 
 ## Installation
 

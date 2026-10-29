@@ -5,10 +5,10 @@
 
   <groupId>io.github.gokhanertogan.runsignal</groupId>
   <artifactId>runsignal-parent</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <packaging>pom</packaging>
   <name>RunSignal for Java</name>
-  <description>Monitor Java background work that no HTTP status code describes with OpenTelemetry.</description>
+  <description>Cron job and background job monitoring for Java and Spring Boot with OpenTelemetry: alerts for missed, failed, overrunning, stalled or low-output @Scheduled methods, Spring Batch jobs and queue consumers, in New Relic, Prometheus and Grafana.</description>
   <url>https://github.com/gokhanertogan/RunSignal</url>
   <licenses>
     <license><name>MIT</name><url>https://opensource.org/licenses/MIT</url></license>

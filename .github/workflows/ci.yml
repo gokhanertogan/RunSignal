@@ -84,6 +84,23 @@ jobs:
           java-version: 21
       - run: mvn -B install -Dspring-boot.version=${{ matrix.spring-boot }} -Dbatch=${{ matrix.batch }}
 
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.9', '3.13']
+    defaults:
+      run:
+        working-directory: src/RunSignal.Python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[celery,apscheduler]" opentelemetry-sdk pytest build
+      - run: pytest
+      - run: python -m build
+
   rust:
     runs-on: ubuntu-latest
     defaults:

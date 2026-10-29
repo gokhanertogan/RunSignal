@@ -1,6 +1,6 @@
 # RunSignal signal specification (v0.1)
 
-This is the contract every RunSignal SDK (.NET, Java, Go, Node.js, Rust) implements. Because every SDK emits
+This is the contract every RunSignal SDK (.NET, Java, Go, Node.js, Python, Rust) implements. Because every SDK emits
 the same OpenTelemetry instruments with the same names and attributes, one set of alert rules works for every
 language.
 

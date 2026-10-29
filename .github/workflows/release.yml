@@ -2,7 +2,9 @@ name: Release
 
 # Pushing a tag such as v0.1.0 publishes every package with that version:
 #   NuGet (10 packages, including the runsignal tool), npm (@runsignal/node), crates.io (runsignal),
-#   Maven Central (io.github.gokhanertogan.runsignal) and Go (tag go/v0.1.0), then creates a GitHub release.
+#   PyPI (runsignal), Maven Central (io.github.gokhanertogan.runsignal) and Go (tag go/v0.1.0), then creates a
+#   GitHub release. PyPI always uses Trusted Publishing: add this workflow as a trusted publisher for the
+#   project "runsignal" on pypi.org (a pending publisher works before the first release).
 #
 # Credentials: each registry uses a token secret when it is set, and Trusted Publishing (OIDC) otherwise.
 # npm and crates.io need a token for the very first publish; after that, configure Trusted Publishing for
@@ -31,8 +33,10 @@ jobs:
           npm=$(node -p "require('./src/RunSignal.Node/package.json').version")
           cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src/RunSignal.Rust/Cargo.toml | head -1)
           maven=$(awk '/<artifactId>runsignal-parent<\/artifactId>/ {f=1} f && /<version>/ {gsub(/.*<version>|<\/version>.*/, ""); print; exit}' src/RunSignal.Java/pom.xml)
-          echo "tag=$version dotnet=$dotnet npm=$npm cargo=$cargo maven=$maven"
-          for v in "$dotnet" "$npm" "$cargo" "$maven"; do
+          python=$(sed -n 's/^version = "\(.*\)"/\1/p' src/RunSignal.Python/pyproject.toml | head -1)
+          python_module=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' src/RunSignal.Python/src/runsignal/_telemetry.py)
+          echo "tag=$version dotnet=$dotnet npm=$npm cargo=$cargo maven=$maven python=$python/$python_module"
+          for v in "$dotnet" "$npm" "$cargo" "$maven" "$python" "$python_module"; do
             if [ "$v" != "$version" ]; then echo "::error::Package version $v does not match tag $GITHUB_REF_NAME"; exit 1; fi
           done
           grep -q "^## $version" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
@@ -129,6 +133,28 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ env.CARGO_TOKEN || steps.auth.outputs.token }}
 
+  pypi:
+    name: PyPI
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: src/RunSignal.Python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: pip install -e ".[celery,apscheduler]" opentelemetry-sdk pytest build && pytest
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: src/RunSignal.Python/dist
+
   maven:
     name: Maven Central
     needs: check
@@ -174,7 +200,7 @@ jobs:
 
   release:
     name: GitHub release
-    needs: [check, nuget, npm, crates, maven, go]
+    needs: [check, nuget, npm, crates, pypi, maven, go]
     runs-on: ubuntu-latest
     permissions:
       contents: write

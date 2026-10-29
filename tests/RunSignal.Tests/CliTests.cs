@@ -77,4 +77,14 @@ public sealed class CliTests : IDisposable
         Assert.Equal(["c"], routes[Severity.Warning]);
         Assert.Throws<ArgumentException>(() => RunSignalCli.ParseChannels(["page=a"]));
     }
+
+    [Fact]
+    public async Task Export_grafana_writes_a_dashboard_without_contacting_new_relic()
+    {
+        Assert.Equal(0, await Run("export", "grafana", _manifest));
+
+        using var document = System.Text.Json.JsonDocument.Parse(_output.ToString());
+        Assert.Equal("RunSignal: billing", document.RootElement.GetProperty("title").GetString());
+        Assert.Empty(_nerdGraph.Operations);
+    }
 }
