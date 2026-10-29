@@ -1,5 +1,10 @@
 # RunSignal for Go
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/gokhanertogan/RunSignal/go.svg)](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go)
+
+**Cron job and background job monitoring for Go, on OpenTelemetry.** Get an alert when a robfig/cron job or
+Kubernetes CronJob is missed, fails or overruns, or when a consumer stops making progress.
+
 Alerts for Go background work that no HTTP status code describes: cron jobs, Kubernetes CronJobs, queue
 consumers and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same
 names as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Go services as for

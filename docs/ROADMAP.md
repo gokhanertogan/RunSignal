@@ -85,6 +85,7 @@ agreement; the first ones cover workload naming.
    - Verified live: the .NET CLI provisioned its alerts unchanged.
    - Found live: OpenTelemetry JS's global meter provider is not a proxy, so a registry created by an import before the SDK started recorded nothing. The registry now follows the global provider.
    - Found on the way: BullMQ 6 needs a constructed ioredis client in ESM.
+   - `cronJob` ✅: one wrapper for node-cron, croner, cron and node-schedule, which declares the job with its schedule at startup.
 3. **Java** ✅ ([src/RunSignal.Java](../src/RunSignal.Java)):
    - `runsignal` core, which depends only on `opentelemetry-api`, and `runsignal-spring-boot-starter`.
    - The starter records every `@Scheduled` run through Spring's own scheduling observations, with no proxies. It registers cron jobs at startup, resolving placeholders and macros, and writes the manifest from `runsignal.manifest-path`.
@@ -103,6 +104,13 @@ agreement; the first ones cover workload naming.
    - Found on the way: `std::any::type_name` changed between Rust versions (`std::io::Error` is now `core::io::error::Error`), so `error.type` from type names is documented as unstable, and `fail_code` is the stable alternative.
    - Follow-up: a `tokio-cron-scheduler` integration.
 
+5. **Python** ✅ ([src/RunSignal.Python](../src/RunSignal.Python), `runsignal` on PyPI):
+   - Depends only on `opentelemetry-api`; `with` / `async with` runs, a `@monitor` decorator for sync and async functions, and `fail_code`.
+   - Celery: signal handlers record every task execution with no code in the tasks; `instrument(app)` registers Celery beat crontab entries before they fire and writes the manifest when the worker is ready.
+   - APScheduler 3: `instrument(scheduler)` wraps every job, including jobs added later, and converts cron triggers (Monday = 0) to cron's day numbering.
+   - Passes the naming and signal conformance vectors and writes a byte-for-byte identical manifest; the .NET CLI plans its alerts unchanged.
+   - Follow-ups: APScheduler 4, RQ and Dramatiq; live verification against New Relic.
+
 All five SDKs are now live-verified against New Relic, each provisioned by the same CLI from its own manifest.
 
 Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exact metrics it must produce: names, types, units, attributes, values and histogram bounds. Every SDK's test suite runs it against its OpenTelemetry SDK, so an SDK that drifts from the spec fails its own CI. The tests were checked to fail when the expected values change.
@@ -113,6 +121,7 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
   - Thresholds come from the shared `RunSignal.Alerting` package, so they match New Relic.
   - Verified against a local Prometheus 3.15 with its OTLP receiver: the metric names were taken from real OTLP ingestion, all rules evaluated healthy, `RunSignalFailed` fired on live failures, and `RunSignalNotReporting` fired when the process stopped.
   - `promtool test rules` covers every rule, including the first failure of a job, which `increase()` alone misses because the counter series is created by that failure.
+- **Grafana dashboard** ✅: `runsignal export grafana` writes a dashboard from the same metrics as the rules, with data source, service and workload variables and a panel of firing RunSignal alerts. Its queries are checked with `promtool`.
 - **Datadog monitors**: next. It needs a Datadog account to verify against.
 
 ### Phase 7: Notifications end to end (last)

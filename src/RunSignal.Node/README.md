@@ -1,10 +1,19 @@
 # RunSignal for Node.js
 
-Alerts for Node.js background work that no HTTP status code describes: BullMQ queues and job schedulers,
-scheduled tasks and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the
-same names as every other RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Node.js services as
-for .NET, Go, Java and Rust ones. The [main README](https://github.com/gokhanertogan/RunSignal#readme) covers the
-concepts, the alerts and the backends.
+[![npm](https://img.shields.io/npm/v/@runsignal/node)](https://www.npmjs.com/package/@runsignal/node)
+[![npm downloads](https://img.shields.io/npm/dm/@runsignal/node)](https://www.npmjs.com/package/@runsignal/node)
+[![license](https://img.shields.io/npm/l/@runsignal/node)](https://github.com/gokhanertogan/RunSignal/blob/main/LICENSE)
+
+**Cron job and background job monitoring for Node.js, on OpenTelemetry.** Get an alert when a scheduled job
+does not run, fails, runs too long or processes nothing, and when a BullMQ worker or sync loop stops making
+progress: the failures no HTTP status code describes. Works with node-cron, croner, cron, node-schedule and
+BullMQ, with no hosted service and no ping URLs.
+
+RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same names as every other
+RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Node.js services as for .NET, Go, Java and
+Rust ones: New Relic alerts and dashboards, or Prometheus rules and a Grafana dashboard. The
+[main README](https://github.com/gokhanertogan/RunSignal#readme) covers the concepts, the alerts and the
+backends.
 
 ## Installation
 
@@ -49,6 +58,31 @@ OpenTelemetry SDK starts. For an explicit provider, use `new WorkloadRegistry({ 
 
 `error.type` is the error's `errorType` property if it has one, then its `code` if that is a string (such as
 `ECONNREFUSED`), then its class name.
+
+## Cron libraries
+
+Since 0.2.0, `cronJob` declares a scheduled job once, with its schedule, and gives you a tick handler for any cron library.
+The workload is registered immediately, so a job that never fires still gets a `missed` alert.
+
+```ts
+import { cronJob } from '@runsignal/node/cron';
+
+const invoices = cronJob('nightly-invoice', { schedule: '0 2 * * *', maxDuration: '30m', minProcessed: 100 }, async (w) => {
+  for (const order of await unbilledOrders()) {
+    await createInvoice(order);
+    w.processed();
+  }
+});
+
+cron.schedule(invoices.schedule, invoices.run);                                 // node-cron
+new Cron(invoices.schedule, invoices.run);                                      // croner
+CronJob.from({ cronTime: invoices.schedule, onTick: invoices.run, start: true }); // cron
+schedule.scheduleJob(invoices.schedule, invoices.run);                          // node-schedule
+```
+
+- **Failures:** a failed tick is recorded with its error type and passed to `onError` (default `console.error`). It is not rethrown, because most cron libraries turn a rejected tick into an unhandled rejection.
+- **Options:** everything `workload()` takes, plus `registry` and `onError`. Declaring the same name twice throws.
+- **Time zones:** if your scheduler runs the pattern in a time zone, pass the same one to the CLI with `--time-zone`.
 
 ## BullMQ
 

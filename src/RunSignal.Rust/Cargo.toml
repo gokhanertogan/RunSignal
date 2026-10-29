@@ -1,9 +1,9 @@
 [package]
 name = "runsignal"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75.0"
-description = "Monitor Rust background work that no HTTP status code describes (scheduled jobs, consumers, pipelines) with OpenTelemetry, and alert on missed, overrunning, stalled or low-output jobs."
+description = "Cron job and background job monitoring with OpenTelemetry: alert on missed, failed, overrunning, stalled or low-output scheduled jobs, consumers and pipelines, in New Relic, Prometheus and Grafana."
 license = "MIT"
 repository = "https://github.com/gokhanertogan/RunSignal"
 homepage = "https://github.com/gokhanertogan/RunSignal"
@@ -12,7 +12,7 @@ readme = "README.md"
 # Reads ../../spec, which is not part of the published crate.
 exclude = ["tests/conformance.rs"]
 keywords = ["observability", "opentelemetry", "monitoring", "cron", "alerting"]
-categories = ["development-tools::debugging"]
+categories = ["development-tools::debugging", "development-tools::profiling", "asynchronous"]
 
 [dependencies]
 opentelemetry = { version = "0.33.1", default-features = false, features = ["metrics", "trace"] }
