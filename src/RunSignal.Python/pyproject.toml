@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "runsignal"
+version = "0.2.0"
+description = "Cron job and background job monitoring for Python with OpenTelemetry: alert when a Celery task, APScheduler job or cron script is missed, fails, overruns, stalls or processes nothing, in New Relic, Prometheus and Grafana."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Gokhan Ertogan" }]
+requires-python = ">=3.9"
+dependencies = ["opentelemetry-api>=1.27"]
+keywords = [
+  "cron-monitoring", "cron", "job-monitoring", "background-jobs", "scheduled-jobs", "heartbeat",
+  "dead-mans-switch", "healthcheck", "celery", "celery-beat", "apscheduler", "worker", "opentelemetry", "otel",
+  "observability", "monitoring", "alerting", "prometheus", "grafana", "newrelic",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: Celery",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Monitoring",
+  "Topic :: System :: Logging",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+celery = ["celery>=5.3"]
+apscheduler = ["apscheduler>=3.10,<4"]
+
+[project.urls]
+Homepage = "https://github.com/gokhanertogan/RunSignal"
+Documentation = "https://github.com/gokhanertogan/RunSignal/tree/main/src/RunSignal.Python#readme"
+Repository = "https://github.com/gokhanertogan/RunSignal"
+Issues = "https://github.com/gokhanertogan/RunSignal/issues"
+Changelog = "https://github.com/gokhanertogan/RunSignal/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/runsignal", "README.md", "LICENSE"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/runsignal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

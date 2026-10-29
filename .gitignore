@@ -487,3 +487,9 @@ BenchmarkDotNet.Artifacts/
 # Go
 *.test
 *.out
+
+# Python SDK
+.venv/
+*.egg-info/
+src/RunSignal.Python/dist/
+.pytest_cache/
