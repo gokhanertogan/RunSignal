@@ -1,0 +1,40 @@
+name: RunSignal alerts for background jobs
+description: Provision New Relic alerts and dashboards, or export Prometheus rules and a Grafana dashboard, for cron jobs, queue consumers and background workers.
+author: Gokhan Ertogan
+branding:
+  icon: bell
+  color: orange
+
+inputs:
+  command:
+    description: >-
+      The runsignal command and its arguments, such as
+      "provision runsignal.json --account-id 1234567 --region EU" or "export prometheus runsignal.json -o rules.yml".
+    required: true
+  version:
+    description: The RunSignal.Cli version to install. Defaults to the latest release.
+    required: false
+    default: ''
+  new-relic-api-key:
+    description: A New Relic User API key, for plan, diff, provision and destroy. Pass it from a secret.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 8.0.x
+    - name: Install the runsignal CLI
+      shell: bash
+      env:
+        RUNSIGNAL_VERSION: ${{ inputs.version }}
+      run: dotnet tool install --global RunSignal.Cli ${RUNSIGNAL_VERSION:+--version "$RUNSIGNAL_VERSION"}
+    - name: runsignal ${{ inputs.command }}
+      shell: bash
+      env:
+        NEW_RELIC_API_KEY: ${{ inputs.new-relic-api-key || env.NEW_RELIC_API_KEY }}
+        RUNSIGNAL_COMMAND: ${{ inputs.command }}
+      # Word splitting is intended: the input is a command line.
+      run: runsignal $RUNSIGNAL_COMMAND
