@@ -6,15 +6,16 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Gokhan Ertogan</Authors>
     <Copyright>Copyright (c) 2026 Gokhan Ertogan</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageProjectUrl>https://github.com/gokhanertogan/RunSignal</PackageProjectUrl>
     <RepositoryUrl>https://github.com/gokhanertogan/RunSignal</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>observability;opentelemetry;monitoring;alerting;background-jobs;cron;heartbeat;hangfire;quartz;newrelic;workload</PackageTags>
+    <PackageTags>cron-monitoring;job-monitoring;background-jobs;scheduled-jobs;cron;heartbeat;dead-mans-switch;backgroundservice;worker-service;hangfire;quartz;opentelemetry;otel;observability;monitoring;alerting;newrelic;prometheus;grafana</PackageTags>
 
     <!-- Source Link: lets consumers step into this code from the debugger. -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -35,6 +36,7 @@
     <!-- nuget.org shows the package README without the repository around it, so packages carry the .NET guide,
          whose links are absolute. -->
     <None Include="$(MSBuildThisFileDirectory)docs/dotnet.md" Pack="true" PackagePath="\README.md" />
+    <None Include="$(MSBuildThisFileDirectory)docs/icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

@@ -4,6 +4,19 @@ All notable changes to RunSignal are recorded here. Every SDK and package in thi
 with the same version number. The project follows [Semantic Versioning](https://semver.org/); until 1.0, minor
 versions may contain breaking changes.
 
+## 0.2.0 (2026-10-29)
+
+### Added
+- Python: the `runsignal` package on PyPI, with Celery (tasks and beat schedules) and APScheduler 3
+  integrations, `with` / `async with` runs and a `@monitor` decorator. It passes the shared conformance vectors
+  and writes the same manifest as the other SDKs.
+- Node.js: `cronJob` (`@runsignal/node/cron`) monitors jobs scheduled with node-cron, croner, cron or
+  node-schedule, and registers them with their schedule at startup so a job that never fires gets a `missed`
+  alert.
+- CLI: `runsignal export grafana` writes a Grafana dashboard for RunSignal metrics in Prometheus.
+- NuGet packages have an icon.
+- A GitHub Action (`uses: gokhanertogan/RunSignal@<ref>`) that installs the CLI and runs any of its commands in CI.
+
 ## 0.1.0 (2026-10-24)
 
 First release.

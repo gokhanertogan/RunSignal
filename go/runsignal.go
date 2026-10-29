@@ -41,7 +41,7 @@ const (
 )
 
 // Version is the SDK version reported as the instrumentation scope version.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // DurationBuckets are the histogram bucket boundaries, in seconds, for MetricDuration: background work runs from
 // milliseconds to hours, while the OpenTelemetry defaults stop at 10 seconds.

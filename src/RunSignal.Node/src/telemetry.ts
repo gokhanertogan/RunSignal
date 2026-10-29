@@ -3,7 +3,7 @@
  * SDK (see spec/README.md in the repository), so one set of alert rules covers every language.
  */
 export const SCOPE_NAME = 'RunSignal';
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 export const Metrics = {
   runs: 'runsignal.workload.runs',
