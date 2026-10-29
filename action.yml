@@ -1,5 +1,5 @@
 name: RunSignal alerts for background jobs
-description: Provision New Relic alerts and dashboards, or export Prometheus rules and a Grafana dashboard, for cron jobs, queue consumers and background workers.
+description: Alerts for cron jobs and background workers: provision New Relic alerts or export Prometheus rules and Grafana dashboards.
 author: Gokhan Ertogan
 branding:
   icon: bell
