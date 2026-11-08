@@ -151,6 +151,14 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
   - Covered by `promtool test rules`.
 - `runsignal discover kubernetes` writes the manifest from CronJobs: schedule macros, `spec.timeZone` and `CRON_TZ=`, `activeDeadlineSeconds`, `runsignal.io/*` annotations.
 - Verified end to end against a local Prometheus 3.15: failed, missed and hung fired from `runsignal exec` runs.
+- Verified live on New Relic (EU) on 2026-11-08, with `runsignal exec` sending over OTLP with delta temporality:
+  - per-run `missed` opened about 3 minutes after the last success (120 s loss of signal);
+  - `failed` opened about 2 minutes after a failed run;
+  - `hung` opened while a run was still in progress;
+  - `overrun` opened when that run finally ended;
+  - the alert drill's `drill-hung` opened as well.
+  - Found live: conditions take a few minutes to start evaluating after `provision`, so a single run sent in that window is not seen. A per-run `missed` is armed by the first success after that.
+  - Removed with `runsignal destroy` afterwards.
 - Native CLI ✅: a 10 MB native AOT executable built on AlmaLinux 8 (glibc 2.28) and Alpine (musl), shipped as release assets and as `ghcr.io/gokhanertogan/runsignal`.
   - Verified: it runs on Debian 10/12, Ubuntu 20.04/22.04, Rocky 8/9, Amazon Linux 2023, the Python, Node and Java images, and Alpine.
   - As PID 1 under `docker stop`, it recorded a cancelled run.

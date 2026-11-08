@@ -309,7 +309,7 @@ Silence between runs is normal, so the alerts work differently:
 | `not reporting` | ✅ | none: silence is normal |
 | `stalled` | ✅ | none: needs a long-running process |
 | `failed`, `overrun`, `hung`, `low output`, failure rates | ✅ | ✅ |
-| Limits | | New Relic: `missed` needs a run at least every 48 hours (loss of signal). Prometheus: the alert closes four schedule gaps after the last success. |
+| Limits | | New Relic: `missed` needs a run at least every 48 hours (loss of signal). It is armed by the first success after `provision` (new conditions take a few minutes to start evaluating). Prometheus: the alert closes four schedule gaps after the last success. |
 
 **Getting `runsignal` into an image.** It is a native executable of about 10 MB with no .NET dependency. Copy it from
 the container image:
