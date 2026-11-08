@@ -33,6 +33,7 @@ language.
 | `runsignal.workload.heartbeats` | Counter (int) | `{heartbeat}` | `runsignal.workload` | Heartbeats |
 | `runsignal.workload.since_success` | Gauge (double) | `s` | `runsignal.workload` | Seconds since the last successful run** |
 | `runsignal.workload.since_heartbeat` | Gauge (double) | `s` | `runsignal.workload` | Seconds since the last heartbeat*** |
+| `runsignal.workload.active_run_age` | Gauge (double) | `s` | `runsignal.workload` | Seconds the oldest unfinished run has been running**** |
 
 \* `error.type` is present only when `runsignal.outcome` is `failure`.
 
@@ -42,10 +43,28 @@ language.
 \*\*\* Until the first heartbeat, counted from when the workload was registered. Reported for workloads that have
 `expectEvery` or have sent a heartbeat.
 
-The two gauges exist because backends can only notice that a signal stopped if it reported at least once
+\*\*\*\* 0 while no run is in progress. Reported for workloads that have `maxDuration` or have started a run.
+
+The `since_*` gauges exist because backends can only notice that a signal stopped if it reported at least once
 (New Relic's loss-of-signal, for example). A job that never runs never reports a run. Its `since_success`
 keeps growing from registration instead, so a plain threshold catches it. Gauges are reported on every export
 while the process is alive, so loss of signal on them means the process itself stopped reporting.
+
+`active_run_age` exists because the duration histogram only records runs that finish: a run that hangs forever
+never reaches it. The gauge grows while a run is in progress, so a plain threshold at `maxDuration` catches a hung
+run while it is still hanging, and returns to 0 when no run is in progress, so the alert closes on its own.
+
+### Tracking unfinished runs
+
+- A run counts as in progress from when it starts until it ends with an outcome. A run that is started and never
+  ended (a bug in the caller) stays in progress, so it eventually opens the `hung` alert. In languages where a run
+  object is destroyed deterministically (Rust's `Drop`), destroying an unended run releases it without recording an
+  outcome, as an explicit discard (.NET's `WorkloadRun.Discard()`) does.
+- SDKs track at least 64 concurrent runs per workload. Runs started while that many are already in progress may go
+  untracked, so with more concurrent runs the reported age is a lower bound.
+- Ending a run more than once must not end a different run that is in progress.
+- Starting and ending a run must still not allocate (see [Performance requirements](#performance-requirements));
+  the tracking storage may be allocated once per workload.
 
 ### Attribute values
 
@@ -74,8 +93,8 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 
 - Recording a run, an item or a heartbeat must not allocate on the heap when no span is being recorded.
 - SDKs must not evaluate alert rules in-process. A process that has died cannot report that it is missing, so
-  the backend detects absence: `missed` and `stalled` from the `since_*` gauges, and a dead process from loss
-  of signal on those gauges.
+  the backend detects absence: `missed` and `stalled` from the `since_*` gauges, `hung` from the
+  `active_run_age` gauge, and a dead process from loss of signal on the `since_*` gauges.
 - Counters must be exported with **delta** temporality. With cumulative temporality the last value is
   re-exported on every interval, so a backend never sees a signal stop.
 
@@ -84,7 +103,7 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 | Field | Meaning | Alert it produces |
 |---|---|---|
 | `schedule` | Cron expression for when the workload should run: 5-field Unix cron, or 6 fields with seconds first. Day of week is 0-7 with 0 and 7 = Sunday, as in Unix cron. SDKs convert scheduler-specific formats, such as Quartz's 1 = Sunday, before writing it | `missed` |
-| `maxDuration` | Longest acceptable run | `overrun` |
+| `maxDuration` | Longest acceptable run | `overrun` (a finished run took longer) and `hung` (an unfinished run has been running longer) |
 | `expectEvery` | Longest acceptable gap between heartbeats | `stalled` |
 | `minProcessed` | Fewest items a run should process | `low-output` |
 | `failureRateThreshold` | Highest acceptable share of failed runs or items (0–1) | `failure-rate` |

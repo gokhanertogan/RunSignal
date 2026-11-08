@@ -42,7 +42,9 @@ public class PrometheusTests
 
         Assert.Contains(warnings, w => w.StartsWith("bare: no rules"));
         Assert.Contains(warnings, w => w.StartsWith("huge: no overrun rule"));
-        Assert.DoesNotContain("alert:", rules);
+        // The hung rule reads a gauge, not histogram buckets, so it still covers limits above the largest bucket.
+        Assert.Equal("RunSignalHung", Assert.Single(rules.Split('\n'), l => l.Contains("- alert:")).Split("alert: ")[1].Trim());
+        Assert.Contains("runsignal_workload_active_run_age_seconds{job=\"billing\", runsignal_workload=\"huge\"}) > 100000", rules);
     }
 
     [Fact]

@@ -62,7 +62,8 @@ public class RunSignalAutoConfiguration {
   }
 
   // Bean post-processors are created early; resolve the registry only when the first job bean appears.
-  private static final class LazyBatchJobListener implements org.springframework.beans.factory.config.BeanPostProcessor {
+  private static final class LazyBatchJobListener implements org.springframework.beans.factory.config.BeanPostProcessor,
+      org.springframework.beans.factory.DisposableBean {
     private final ObjectProvider<WorkloadRegistry> registry;
     private final ObjectProvider<RunSignalProperties> properties;
     private final ClassLoader classLoader;
@@ -89,6 +90,14 @@ public class RunSignalAutoConfiguration {
         }
       }
       return d.postProcessAfterInitialization(bean, beanName);
+    }
+
+    @Override
+    public void destroy() {
+      BatchJobListener d = delegate;
+      if (d != null) {
+        d.close();
+      }
     }
 
     private static boolean isJob(Object bean) {

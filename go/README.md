@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/gokhanertogan/RunSignal/go.svg)](https://pkg.go.dev/github.com/gokhanertogan/RunSignal/go)
 
 **Cron job and background job monitoring for Go, on OpenTelemetry.** Get an alert when a robfig/cron job or
-Kubernetes CronJob is missed, fails or overruns, or when a consumer stops making progress.
+Kubernetes CronJob is missed, fails, overruns or hangs, or when a consumer stops making progress.
 
 Alerts for Go background work that no HTTP status code describes: cron jobs, Kubernetes CronJobs, queue
 consumers and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same
@@ -50,7 +50,7 @@ set up. For explicit providers, use `runsignal.NewRegistry(runsignal.WithMeterPr
 | Call | Records |
 |---|---|
 | `w.Run(ctx, fn)` | One run. It succeeds on `nil`, is cancelled when `ctx` was cancelled, and fails otherwise. A panic fails the run and is re-raised. |
-| `ctx, run := w.Start(ctx)` then `run.Succeed()` / `Fail(err)` / `FailCode(code, msg)` / `Cancel()` | A run ended by hand. |
+| `ctx, run := w.Start(ctx)` then `run.Succeed()` / `Fail(err)` / `FailCode(code, msg)` / `Cancel()` | A run ended by hand. Until it ends it counts as in progress: a run that is never ended reports a growing `active_run_age` and opens the `hung` alert once it passes `MaxDuration`. |
 | `w.Processed(ctx, n)` / `w.ItemFailed(ctx, n)` | Items handled. |
 | `w.Beat(ctx)` | A heartbeat from a long-running loop. |
 

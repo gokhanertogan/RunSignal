@@ -9,9 +9,11 @@ using RunSignal;
 //   RUNSIGNAL_MANIFEST_PATH=drill.json dotnet run      (writes the manifest, then keeps running)
 //   runsignal provision drill.json --account-id ... --region ...
 //
-// Expected incidents, as observed on New Relic: overrun and stalled within about 5 minutes; failure rate and
+// Expected incidents, as observed on New Relic: overrun and stalled within about 5 minutes; hung about 3 minutes
+// after start (its run passes the 2-minute limit and never finishes); failure rate and
 // item failure rate within about 30 minutes (their 15-minute window has to close); low output after its one-hour
-// window closes. Remove them with `runsignal destroy`.
+// window closes. drill-overrun may also open hung now and then, when an export lands while one of its 8-second
+// runs is past 5 seconds. Remove them with `runsignal destroy`.
 // Signals go to New Relic over OTLP with NEW_RELIC_LICENSE_KEY (and NEW_RELIC_REGION=EU for the EU data center).
 var builder = Host.CreateApplicationBuilder(args);
 var licenseKey = Environment.GetEnvironmentVariable("NEW_RELIC_LICENSE_KEY")
@@ -33,7 +35,9 @@ builder.Services.AddRunSignal(o => o.ServiceName = "runsignal-alert-drill")
     // Six runs in ten fail, and so do six items in ten, against a 20% threshold.
     .AddWorkload("drill-failure-rate", o => o.FailureRateThreshold = 0.2)
     // Beats once, then never again, against a one-minute expectation; the process keeps reporting.
-    .AddWorkload("drill-stalled", o => o.ExpectEvery = TimeSpan.FromMinutes(1));
+    .AddWorkload("drill-stalled", o => o.ExpectEvery = TimeSpan.FromMinutes(1))
+    // One run that starts and never finishes, against a 2-minute limit; it is cancelled on shutdown.
+    .AddWorkload("drill-hung", o => o.MaxDuration = TimeSpan.FromMinutes(2));
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("runsignal-alert-drill"))
@@ -56,13 +60,15 @@ internal sealed class Drill(
     [FromKeyedServices("drill-low-output")] Workload lowOutput,
     [FromKeyedServices("drill-failure-rate")] Workload failureRate,
     [FromKeyedServices("drill-stalled")] Workload stalled,
+    [FromKeyedServices("drill-hung")] Workload hung,
     ILogger<Drill> log) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stop)
     {
         stalled.Beat();
-        log.LogInformation("Alert drill running: overrun, low output, failure rate and stalled are being broken on purpose.");
+        log.LogInformation("Alert drill running: overrun, hung, low output, failure rate and stalled are being broken on purpose.");
         return Task.WhenAll(
+            HangAsync(stop),
             Every(TimeSpan.FromMinutes(1), () => overrun.RunAsync(ct => Task.Delay(TimeSpan.FromSeconds(8), ct), stop), stop),
             Every(TimeSpan.FromSeconds(30), () => lowOutput.RunAsync(_ =>
             {
@@ -82,6 +88,18 @@ internal sealed class Drill(
                     // Recorded as a failed run, on purpose.
                 }
             }, stop));
+    }
+
+    private async Task HangAsync(CancellationToken stop)
+    {
+        try
+        {
+            await hung.RunAsync(ct => Task.Delay(Timeout.Infinite, ct), stop);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown: recorded as a cancelled run.
+        }
     }
 
     private static async Task Every(TimeSpan interval, Func<Task> action, CancellationToken stop)

@@ -1,6 +1,6 @@
 // Package runsignal records runs, items and heartbeats of background work (scheduled jobs, queue consumers,
 // sync loops) as OpenTelemetry metrics and spans, so you can alert on work that no HTTP status code describes:
-// missed, overrunning, stalled or low-output jobs.
+// missed, overrunning, hung, stalled or low-output jobs.
 //
 // The metric names, attributes and manifest format are the same in every RunSignal SDK (see spec/README.md in
 // the repository), so one set of alert rules covers .NET, Go, Java, Node.js and Rust services.
@@ -33,6 +33,7 @@ const (
 	MetricHeartbeats     = "runsignal.workload.heartbeats"
 	MetricSinceSuccess   = "runsignal.workload.since_success"
 	MetricSinceHeartbeat = "runsignal.workload.since_heartbeat"
+	MetricActiveRunAge   = "runsignal.workload.active_run_age"
 
 	AttributeWorkload   = "runsignal.workload"
 	AttributeOutcome    = "runsignal.outcome"

@@ -66,6 +66,27 @@ tests:
               summary: 'billing/nightly-invoice: not-reporting'
               description: 'nightly-invoice has reported nothing for 15m: the service is down or not exporting.'
 
+  # Hung: a run is still in progress after the 30-minute limit, so the histogram has not seen it yet.
+  # It fires after one minute above the limit and resolves when the run ends and the gauge returns to 0.
+  - interval: 1m
+    input_series:
+      - series: 'runsignal_workload_active_run_age_seconds{job="billing", runsignal_workload="nightly-invoice", instance="a"}'
+        values: '1680 1740 1800 1860 1920 1980 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RunSignalHung
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: RunSignalHung
+        exp_alerts:
+          - exp_labels: { job: billing, runsignal_workload: nightly-invoice, severity: critical, runsignal_alert: hung }
+            exp_annotations:
+              summary: 'billing/nightly-invoice: hung'
+              description: 'A run of nightly-invoice has been running for longer than 30m and has not finished: it may be hung, or the code never ends the run.'
+      - eval_time: 7m
+        alertname: RunSignalHung
+        exp_alerts: []
+
   # Overrun: the 30-minute limit falls on the 1800 bucket.
   - interval: 1m
     input_series:

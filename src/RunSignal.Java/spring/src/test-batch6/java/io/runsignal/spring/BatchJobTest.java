@@ -36,6 +36,12 @@ import org.springframework.transaction.PlatformTransactionManager;
     "runsignal.workloads.invoice-export.severity=critical",
 })
 class BatchJobTest {
+  static {
+    // A run whose afterJob never comes is ended this long after its execution ended (30 s in production).
+    BatchJobListener.sweepGrace = Duration.ofMillis(300);
+    BatchJobListener.sweepInterval = Duration.ofMillis(50);
+  }
+
   @SpringBootConfiguration
   @EnableAutoConfiguration
   static class App {
@@ -77,11 +83,31 @@ class BatchJobTest {
           .build();
       return new JobBuilder("ledgerClose", repository).start(step).build();
     }
+
+    // Its job repository fails to save the finished execution, so Spring Batch never calls afterJob.
+    @Bean
+    Job catalogSync(JobRepository repository, PlatformTransactionManager tx) {
+      var step = new StepBuilder("sync", repository).tasklet((contribution, context) -> null, tx).build();
+      JobRepository failing = (JobRepository) java.lang.reflect.Proxy.newProxyInstance(
+          JobRepository.class.getClassLoader(), new Class<?>[] {JobRepository.class}, (proxy, method, args) -> {
+            if (method.getName().equals("update") && args[0].getClass().getSimpleName().equals("JobExecution")
+                && args[0].getClass().getMethod("getEndTime").invoke(args[0]) != null) {
+              throw new IllegalStateException("database is down");
+            }
+            try {
+              return method.invoke(repository, args);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+              throw e.getCause();
+            }
+          });
+      return new JobBuilder("catalogSync", failing).start(step).build();
+    }
   }
 
   @Autowired JobOperator operator;
   @Autowired @Qualifier("invoiceExport") Job invoiceExport;
   @Autowired @Qualifier("ledgerClose") Job ledgerClose;
+  @Autowired @Qualifier("catalogSync") Job catalogSync;
   @Autowired WorkloadRegistry registry;
   @Autowired InMemoryMetricReader reader;
 
@@ -108,5 +134,42 @@ class BatchJobTest {
         .containsEntry("runsignal.workload.items [invoice-export, processed]", 8L)
         .containsEntry("runsignal.workload.items [failed, invoice-export]", 2L)
         .containsEntry("runsignal.workload.runs [failure, java.lang.IllegalStateException, ledger-close]", 1L);
+  }
+
+  @Test
+  void aRunWhoseFinalRepositoryUpdateFailsIsEndedInsteadOfLookingHung() throws Exception {
+    try {
+      operator.start(catalogSync, new JobParametersBuilder().addLong("run", 1L).toJobParameters());
+    } catch (Exception expected) {
+      // the failed update may propagate to the caller
+    }
+
+    Long failed = null;
+    Double age = null;
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while ((failed == null || age == null || age != 0.0) && System.nanoTime() < deadline) {
+      Thread.sleep(50);
+      failed = null;
+      age = null;
+      for (MetricData metric : reader.collectAllMetrics()) {
+        if (metric.getName().equals("runsignal.workload.runs")) {
+          for (var p : metric.getLongSumData().getPoints()) {
+            if (p.getAttributes().asMap().values().stream().map(String::valueOf).sorted().toList()
+                .equals(List.of("catalog-sync", "failure", BatchJobListener.UPDATE_FAILED))) {
+              failed = p.getValue();
+            }
+          }
+        }
+        if (metric.getName().equals("runsignal.workload.active_run_age")) {
+          for (var p : metric.getDoubleGaugeData().getPoints()) {
+            if (p.getAttributes().asMap().containsValue("catalog-sync")) {
+              age = p.getValue();
+            }
+          }
+        }
+      }
+    }
+    assertThat(failed).isEqualTo(1L);
+    assertThat(age).isZero();
   }
 }

@@ -3,7 +3,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.gokhanertogan.runsignal/runsignal)](https://central.sonatype.com/namespace/io.github.gokhanertogan.runsignal)
 
 **Spring Boot `@Scheduled` and Spring Batch monitoring, on OpenTelemetry.** Get an alert when a scheduled job is
-missed, fails, overruns or processes nothing, with no code in your jobs.
+missed, fails, overruns, hangs or processes nothing, with no code in your jobs.
 
 Alerts for Java background work that no HTTP status code describes: Spring `@Scheduled` jobs, Spring Batch jobs,
 consumers and sync loops. RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same
@@ -66,6 +66,9 @@ runsignal:
       severity: critical
 ```
 
+Workloads report their `since_success` (and, with `maxDuration`, `active_run_age`) gauges from startup, so a cron
+job that never fires is still alerted on.
+
 Inject `WorkloadRegistry` for workloads that are not `@Scheduled` methods or Batch jobs.
 
 ### Spring Batch
@@ -75,6 +78,7 @@ Spring Batch jobs are monitored with no code either.
 - **Runs:** every job execution is a run of a workload named after the job (`invoiceExport` becomes `invoice-export`). `COMPLETED` is a success, `FAILED` is a failure with the job's first exception (or its exit code), and `STOPPED` and `ABANDONED` are cancelled.
 - **Items:** items written by the job's steps count as processed and skipped items as failed, so `minProcessed` and the item failure rate work out of the box.
 - **Registration:** jobs are registered as workloads at startup.
+- **Failed final save:** on Spring Batch 6, if saving the finished execution to the job repository throws, Spring Batch never calls `afterJob`. The starter notices that the execution has ended and, about 30 to 60 seconds later, records the run as a failure with `error.type` `job_repository_update_failed`, so it does not look hung. The repository still shows the execution as running, which blocks restarting the job.
 - **Versions:** Spring Batch 6 moved its types to new packages. The starter supports Batch 5 and 6 through reflection, with a few reflective calls per job execution.
 
 Set Batch jobs' expectations under `runsignal.workloads`, as above.
@@ -102,15 +106,22 @@ invoices.run(() -> {
 | Call | Records |
 |---|---|
 | `w.run(...)` / `w.call(...)` | One run. It succeeds when it returns, is cancelled on `InterruptedException` or `CancellationException`, and fails when it throws. Exceptions are rethrown. |
-| `WorkloadRun run = w.start()` then `succeed()` / `fail(e)` / `failCode(code, msg)` / `cancel()` | A run ended by hand. Later calls are ignored. |
+| `WorkloadRun run = w.start()` then `succeed()` / `fail(e)` / `failCode(code, msg)` / `cancel()` | A run ended by hand. Later calls are ignored. A run that is never ended stays in progress, so it opens the `hung` alert once it passes `maxDuration`. |
 | `w.processed(n)` / `w.itemFailed(n)` | Items handled. |
 | `w.beat()` | A heartbeat from a long-running loop. |
+
+While a run is in progress, the `runsignal.workload.active_run_age` gauge reports how long the oldest unfinished
+run of the workload has been running (0 when none is), for workloads that have `maxDuration` or have started a
+run. A run that hangs never records a duration, so this is what the `hung` alert watches. Up to 64 concurrent runs
+per workload are tracked; beyond that the reported age is a lower bound.
 
 `error.type` is the exception's class name, looking through wrappers such as `ExecutionException`. Implement
 `ErrorTyped` to supply a stable code instead.
 
 `WorkloadRegistry.global()` reads `GlobalOpenTelemetry` on first use, not when it is created, because calling
-`GlobalOpenTelemetry.get()` before the SDK or the agent registers would fix it to a no-op for good. Write the
+`GlobalOpenTelemetry.get()` before the SDK or the agent registers would fix it to a no-op for good. A registry
+reports its gauges as soon as a workload is registered; `global()` does so only once `GlobalOpenTelemetry` is set
+(the Java agent sets it before your code runs), and otherwise from the first run, item or heartbeat. Write the
 manifest with `registry.writeManifestFromEnv("billing-service")`; the starter does this for you.
 
 ## Exporting

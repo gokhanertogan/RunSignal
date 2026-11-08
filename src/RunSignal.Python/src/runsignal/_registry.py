@@ -8,6 +8,7 @@ import re
 import sys
 import threading
 import time
+import weakref
 from datetime import timedelta
 from typing import Any, Callable, Iterable, Literal, TypeVar, Union
 
@@ -84,7 +85,7 @@ class Expectations:
 
 
 class _Instruments:
-    def __init__(self, registry: WorkloadRegistry, provider: MeterProvider) -> None:
+    def __init__(self, registry: WorkloadRegistry, provider: MeterProvider, global_provider: bool) -> None:
         meter = provider.get_meter(SCOPE_NAME, VERSION)
         self.runs = meter.create_counter(Metrics.RUNS, unit="{run}", description="Completed runs of a workload.")
         self.duration = meter.create_histogram(
@@ -97,18 +98,72 @@ class _Instruments:
         self.heartbeats = meter.create_counter(
             Metrics.HEARTBEATS, unit="{heartbeat}", description="Heartbeats of long-running workloads."
         )
+        _shared_gauges(provider, global_provider).add(registry)
+
+
+class _SharedGauges:
+    """The observable gauges of every registry recording on one meter provider.
+
+    OpenTelemetry keeps only the first instrument registered under a name on a meter, so a second registry's own
+    gauges would be silently dropped, and with them its missed, stalled and hung alerts. Registries on the same
+    provider therefore share one set of gauges whose callbacks observe all of them.
+    """
+
+    def __init__(self, provider: MeterProvider) -> None:
+        self._registries: weakref.WeakSet[WorkloadRegistry] = weakref.WeakSet()
+        meter = provider.get_meter(SCOPE_NAME, VERSION)
         meter.create_observable_gauge(
             Metrics.SINCE_SUCCESS,
-            callbacks=[registry._observe_since_success],
+            callbacks=[self._observe(lambda r, o: r._observe_since_success(o))],
             unit="s",
             description="Seconds since the last successful run of a workload, or since it was registered.",
         )
         meter.create_observable_gauge(
             Metrics.SINCE_HEARTBEAT,
-            callbacks=[registry._observe_since_heartbeat],
+            callbacks=[self._observe(lambda r, o: r._observe_since_heartbeat(o))],
             unit="s",
             description="Seconds since the last heartbeat of a workload, or since it was registered.",
         )
+        meter.create_observable_gauge(
+            Metrics.ACTIVE_RUN_AGE,
+            callbacks=[self._observe(lambda r, o: r._observe_active_run_age(o))],
+            unit="s",
+            description="Seconds the oldest unfinished run of a workload has been running, or 0 when none is.",
+        )
+
+    def add(self, registry: WorkloadRegistry) -> None:
+        self._registries.add(registry)
+
+    def _observe(
+        self, observe: Callable[[WorkloadRegistry, CallbackOptions], Iterable[Observation]]
+    ) -> Callable[[CallbackOptions], Iterable[Observation]]:
+        def callback(options: CallbackOptions) -> Iterable[Observation]:
+            observations: list[Observation] = []
+            for registry in list(self._registries):
+                observations.extend(observe(registry, options))
+            return observations
+
+        return callback
+
+
+_shared_gauges_lock = threading.Lock()
+# Registries on the global provider share one set: before the SDK starts that provider is a proxy whose meters
+# later forward to the SDK, so it and the SDK provider end up on the same meter.
+_global_gauges: _SharedGauges | None = None
+_provider_gauges: weakref.WeakKeyDictionary[MeterProvider, _SharedGauges] = weakref.WeakKeyDictionary()
+
+
+def _shared_gauges(provider: MeterProvider, global_provider: bool) -> _SharedGauges:
+    global _global_gauges
+    with _shared_gauges_lock:
+        if global_provider or provider is metrics.get_meter_provider():
+            if _global_gauges is None:
+                _global_gauges = _SharedGauges(metrics.get_meter_provider())
+            return _global_gauges
+        gauges = _provider_gauges.get(provider)
+        if gauges is None:
+            gauges = _provider_gauges[provider] = _SharedGauges(provider)
+        return gauges
 
 
 class WorkloadRegistry:
@@ -127,7 +182,7 @@ class WorkloadRegistry:
     ) -> None:
         self._workloads: dict[str, Workload] = {}
         self._lock = threading.Lock()
-        self._instruments = _Instruments(self, meter_provider or metrics.get_meter_provider())
+        self._instruments = _Instruments(self, meter_provider or metrics.get_meter_provider(), meter_provider is None)
         self._tracer = (tracer_provider or trace.get_tracer_provider()).get_tracer(SCOPE_NAME, VERSION) if tracing else None
 
     def workload(
@@ -239,9 +294,21 @@ class WorkloadRegistry:
             if seconds is not None:
                 yield Observation(seconds, w._name_attributes)
 
+    def _observe_active_run_age(self, options: CallbackOptions) -> Iterable[Observation]:
+        now = time.monotonic()
+        for w in self.workloads:
+            seconds = w._active_run_age(now)
+            if seconds is not None:
+                yield Observation(seconds, w._name_attributes)
+
 
 def _number(value: float) -> float | int:
     return int(value) if float(value).is_integer() else value
+
+
+# Runs tracked per workload for active_run_age. Runs started while this many are in progress are not tracked, so
+# the reported age is then a lower bound.
+_ACTIVE_RUN_SLOTS = 64
 
 
 class Workload:
@@ -263,14 +330,22 @@ class Workload:
         self._last_success = self._last_heartbeat = time.monotonic()
         self._has_started = False
         self._has_beaten = False
+        # The runs in progress, None for a free slot, allocated on the first run. A run claims a slot when it starts
+        # and frees it when it ends; the oldest one gives active_run_age. Celery and APScheduler run jobs on threads.
+        self._active_runs: list[Run | None] | None = None
+        self._active_lock = threading.Lock()
 
     def start(self) -> Run:
         """Starts a run. End it with exactly one call to ``succeed``, ``fail``, ``fail_code`` or ``cancel``; later
-        calls are ignored. Prefer ``run()`` as a context manager, which ends the run for you."""
+        calls are ignored. Prefer ``run()`` as a context manager, which ends the run for you. A run that is never
+        ended stays in progress: it records no outcome or duration, and its age keeps growing on
+        ``runsignal.workload.active_run_age``, which opens the hung alert."""
         self._has_started = True
         tracer = self._registry._tracer
         span = tracer.start_span(self.name, kind=SpanKind.INTERNAL, attributes=self._name_attributes) if tracer else None
-        return Run(self, time.monotonic(), span)
+        run = Run(self, time.monotonic(), span)
+        run._slot = self._track_start(run)
+        return run
 
     def run(self) -> Run:
         """A run to use as a context manager, ``with`` or ``async with``. It succeeds when the block completes,
@@ -335,6 +410,36 @@ class Workload:
                     span.set_status(Status(StatusCode.OK))
             span.end()
 
+    # Returns the slot the run claimed, or -1 when every slot is taken; such a run is not tracked.
+    def _track_start(self, run: Run) -> int:
+        with self._active_lock:
+            runs = self._active_runs
+            if runs is None:
+                runs = self._active_runs = [None] * _ACTIVE_RUN_SLOTS
+            for i, slot in enumerate(runs):
+                if slot is None:
+                    runs[i] = run
+                    return i
+        return -1
+
+    # Frees the run's slot only if it still holds this run, so ending a run twice cannot end a newer run.
+    def _track_end(self, run: Run) -> None:
+        if run._slot < 0:
+            return
+        with self._active_lock:
+            runs = self._active_runs
+            if runs is not None and runs[run._slot] is run:
+                runs[run._slot] = None
+
+    # Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum duration
+    # or have run, so the hung alert has a value to evaluate, and closes, while nothing is running.
+    def _active_run_age(self, now: float) -> float | None:
+        if not self._has_started and self.expectations.max_duration is None:
+            return None
+        with self._active_lock:
+            starts = [r._started for r in self._active_runs or () if r is not None]
+        return max(0.0, now - min(starts)) if starts else 0.0
+
     # Reported for workloads that are scheduled or have run, so alerts can tell a missed run from a workload that
     # simply has no runs.
     def _seconds_since_success(self, now: float) -> float | None:
@@ -355,7 +460,7 @@ class Workload:
 class Run:
     """One run of a Workload, from ``Workload.start`` or ``Workload.run``."""
 
-    __slots__ = ("workload", "span", "_started", "_ended", "_token")
+    __slots__ = ("workload", "span", "_started", "_ended", "_token", "_slot")
 
     def __init__(self, workload: Workload, started: float, span: Span | None) -> None:
         self.workload = workload
@@ -363,6 +468,7 @@ class Run:
         self._started = started
         self._ended = False
         self._token: object | None = None
+        self._slot = -1
 
     @property
     def elapsed(self) -> float:
@@ -395,6 +501,7 @@ class Run:
         if self._ended:
             return False
         self._ended = True
+        self.workload._track_end(self)
         return True
 
     def __enter__(self) -> Run:

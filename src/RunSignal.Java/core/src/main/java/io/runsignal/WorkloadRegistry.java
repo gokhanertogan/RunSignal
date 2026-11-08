@@ -25,11 +25,12 @@ import java.util.function.Supplier;
 public final class WorkloadRegistry {
   record Instruments(LongCounter runs, DoubleHistogram duration, LongCounter items, LongCounter heartbeats) {}
 
-  private static final WorkloadRegistry GLOBAL = new WorkloadRegistry(GlobalOpenTelemetry::get, true);
+  private static final WorkloadRegistry GLOBAL = new WorkloadRegistry(GlobalOpenTelemetry::get, true, true);
 
   private final Map<String, Workload> workloads = new ConcurrentHashMap<>();
   private final Supplier<OpenTelemetry> openTelemetry;
   private final boolean tracing;
+  private final boolean global;
   private volatile Instruments instruments;
   private volatile Tracer tracer;
 
@@ -43,12 +44,13 @@ public final class WorkloadRegistry {
    * workloads that run thousands of times per second.
    */
   public WorkloadRegistry(OpenTelemetry openTelemetry, boolean tracing) {
-    this(() -> openTelemetry, tracing);
+    this(() -> openTelemetry, tracing, false);
   }
 
-  private WorkloadRegistry(Supplier<OpenTelemetry> openTelemetry, boolean tracing) {
+  private WorkloadRegistry(Supplier<OpenTelemetry> openTelemetry, boolean tracing, boolean global) {
     this.openTelemetry = openTelemetry;
     this.tracing = tracing;
+    this.global = global;
   }
 
   /**
@@ -58,6 +60,17 @@ public final class WorkloadRegistry {
    */
   public static WorkloadRegistry global() {
     return GLOBAL;
+  }
+
+  /**
+   * Forgets the workloads and instruments of this registry, for tests that replace GlobalOpenTelemetry with
+   * {@code GlobalOpenTelemetry.resetForTest()}: the global registry would otherwise keep recording on the instance
+   * it first resolved.
+   */
+  synchronized void resetForTest() {
+    workloads.clear();
+    instruments = null;
+    tracer = null;
   }
 
   /**
@@ -76,6 +89,7 @@ public final class WorkloadRegistry {
     if (raced != null) {
       throw new IllegalStateException("Workload '" + name + "' is already registered; set its options only where it is first created.");
     }
+    registerGauges();
     return created;
   }
 
@@ -95,7 +109,29 @@ public final class WorkloadRegistry {
       return existing;
     }
     WorkloadNames.validate(name);
-    return workloads.computeIfAbsent(name, n -> new Workload(this, n, options));
+    Workload workload = workloads.computeIfAbsent(name, n -> new Workload(this, n, options));
+    registerGauges();
+    return workload;
+  }
+
+  /**
+   * Creates the instruments, and with them the gauges, as soon as a workload exists, so a workload that never runs
+   * still reports {@code since_success} (and {@code active_run_age}) and its missed run is alerted on. The global
+   * registry waits until GlobalOpenTelemetry is set: reading it earlier would fix it to a no-op for good. Until
+   * then its instruments are created by the first run, item or heartbeat, as before.
+   */
+  private void registerGauges() {
+    if (instruments == null && (!global || globalIsSet())) {
+      instruments();
+    }
+  }
+
+  private static boolean globalIsSet() {
+    try {
+      return GlobalOpenTelemetry.isSet();
+    } catch (NoSuchMethodError e) {
+      return false; // older opentelemetry-api versions have no isSet(): wait for the first record, as before
+    }
   }
 
   /** Every workload created so far, sorted by name. */
@@ -136,7 +172,9 @@ public final class WorkloadRegistry {
         .setDescription("Seconds since the last successful run of a workload, or since it was registered.").buildObserver();
     var sinceHeartbeat = meter.gaugeBuilder(RunSignalTelemetry.METRIC_SINCE_HEARTBEAT).setUnit("s")
         .setDescription("Seconds since the last heartbeat of a workload, or since it was registered.").buildObserver();
-    meter.batchCallback(() -> observe(sinceSuccess, sinceHeartbeat), sinceSuccess, sinceHeartbeat);
+    var activeRunAge = meter.gaugeBuilder(RunSignalTelemetry.METRIC_ACTIVE_RUN_AGE).setUnit("s")
+        .setDescription("Seconds the oldest unfinished run of a workload has been running, or 0.").buildObserver();
+    meter.batchCallback(() -> observe(sinceSuccess, sinceHeartbeat, activeRunAge), sinceSuccess, sinceHeartbeat, activeRunAge);
 
     return new Instruments(
         meter.counterBuilder(RunSignalTelemetry.METRIC_RUNS).setUnit("{run}").setDescription("Completed runs of a workload.").build(),
@@ -146,7 +184,8 @@ public final class WorkloadRegistry {
         meter.counterBuilder(RunSignalTelemetry.METRIC_HEARTBEATS).setUnit("{heartbeat}").setDescription("Heartbeats of long-running workloads.").build());
   }
 
-  private void observe(ObservableDoubleMeasurement sinceSuccess, ObservableDoubleMeasurement sinceHeartbeat) {
+  private void observe(ObservableDoubleMeasurement sinceSuccess, ObservableDoubleMeasurement sinceHeartbeat,
+      ObservableDoubleMeasurement activeRunAge) {
     long now = System.nanoTime();
     for (Workload w : workloads.values()) {
       double success = w.secondsSinceSuccess(now);
@@ -156,6 +195,10 @@ public final class WorkloadRegistry {
       double heartbeat = w.secondsSinceHeartbeat(now);
       if (!Double.isNaN(heartbeat)) {
         sinceHeartbeat.record(heartbeat, w.nameAttributes);
+      }
+      double age = w.activeRunAge(now);
+      if (!Double.isNaN(age)) {
+        activeRunAge.record(age, w.nameAttributes);
       }
     }
   }

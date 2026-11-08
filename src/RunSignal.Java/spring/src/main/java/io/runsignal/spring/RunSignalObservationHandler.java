@@ -51,9 +51,11 @@ public final class RunSignalObservationHandler implements ObservationHandler<Sch
       return;
     }
     Throwable error = context.getError();
-    if (error == null) {
+    if (error == null && context.isComplete()) {
       run.succeed();
-    } else if (error instanceof InterruptedException) {
+    } else if (error == null || error instanceof InterruptedException) {
+      // Stopped without completing or failing: a reactive @Scheduled method whose subscription was cancelled,
+      // for example on shutdown.
       run.cancel();
     } else {
       run.fail(error);

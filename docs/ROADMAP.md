@@ -64,7 +64,7 @@ path, no in-process rule evaluation).
   - The live API also showed that EVENT_FLOW conditions require `aggregationDelay`, and that NerdGraph puts error details in `extensions`, which the CLI now prints.
 - Follow-ups:
   - Low output is approximate for runs longer than its one-hour window.
-  - Overrun only sees runs that finish (a hung run shows up as missed or stalled).
+  - Overrun only sees runs that finish. Fixed by the `hung` alert ✅ (see below).
   - Workflows match one policy each.
 
 ### Phase 5: Other languages
@@ -135,6 +135,12 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
 - Every alert kind has now fired on a live New Relic account:
   - From the drill: `overrun` and `stalled` (by threshold, with the process still reporting) within about 5 minutes; `failure rate` and `item failure rate` within about 30 minutes; `low output` once its hour closed.
   - From earlier tests: `failed`, `missed` (by threshold in the Go test, and by loss of signal) and `stalled` by loss of signal.
+
+### Hung runs ✅
+- Spec: `runsignal.workload.active_run_age` gauge, the age of the oldest unfinished run, 0 when none is. Reported for workloads with `maxDuration` or that have run, so the alert has a value to evaluate and closes on its own.
+- Every SDK tracks up to 64 concurrent runs per workload in a fixed slot array allocated once, so starting and ending runs still allocates nothing. A slot is freed by compare-and-swap on the run's start time, so ending a run twice cannot end a newer one.
+- `hung` condition in New Relic and `RunSignalHung` rule in Prometheus (covered by `promtool test rules`).
+- Follow-up: verify `hung` live on New Relic with the alert drill.
 
 ### Also done
 - `runsignal destroy` removes what RunSignal created for a service, keeps conditions added by hand and never deletes notification channels. Verified live by cleaning up the five sample services.

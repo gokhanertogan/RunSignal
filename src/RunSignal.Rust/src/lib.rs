@@ -42,6 +42,7 @@ pub const METRIC_ITEMS: &str = "runsignal.workload.items";
 pub const METRIC_HEARTBEATS: &str = "runsignal.workload.heartbeats";
 pub const METRIC_SINCE_SUCCESS: &str = "runsignal.workload.since_success";
 pub const METRIC_SINCE_HEARTBEAT: &str = "runsignal.workload.since_heartbeat";
+pub const METRIC_ACTIVE_RUN_AGE: &str = "runsignal.workload.active_run_age";
 
 pub const ATTRIBUTE_WORKLOAD: &str = "runsignal.workload";
 pub const ATTRIBUTE_OUTCOME: &str = "runsignal.outcome";

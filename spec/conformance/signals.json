@@ -63,6 +63,15 @@
       ]
     },
     {
+      "name": "runsignal.workload.active_run_age",
+      "type": "gauge",
+      "unit": "s",
+      "points": [
+        { "attributes": { "runsignal.workload": "conf-scheduled" } },
+        { "attributes": { "runsignal.workload": "conf-loop" } }
+      ]
+    },
+    {
       "name": "runsignal.workload.since_heartbeat",
       "type": "gauge",
       "unit": "s",

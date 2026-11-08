@@ -38,6 +38,14 @@ describe('cronJob', () => {
     assert.equal(runs?.attributes[Attributes.errorType], 'statement_missing');
   });
 
+  it('leaves no run in progress after a tick fails, even synchronously', async () => {
+    const { registry, collect } = harness();
+    const job = cronJob('sync-throw', { schedule: '* * * * *', maxDuration: '1m', registry, onError: () => {} }, () => { throw new Error('boom'); });
+    await job.run();
+    await job.run();
+    assert.deepEqual((await collect())[Metrics.activeRunAge]?.map((p) => p.value), [0]);
+  });
+
   it('rejects a second declaration of the same job', () => {
     const { registry } = harness();
     cronJob('import', { schedule: '0 * * * *', registry }, () => {});

@@ -7,17 +7,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * One run of a {@link Workload}, started with {@link Workload#start()}. End it with exactly one call to
  * {@link #succeed()}, {@link #fail(Throwable)}, {@link #failCode(String, String)} or {@link #cancel()}; later calls
- * are ignored. A run that is never ended records nothing, which the backend sees as a missed run.
+ * are ignored. A run that is never ended records no outcome and stays in progress: the workload's
+ * {@code active_run_age} gauge keeps growing, which opens the {@code hung} alert once it passes {@code maxDuration}.
  */
 public final class WorkloadRun {
   private final Workload workload;
   private final long start;
+  private final int slot;
   private final Span span;
   private final AtomicBoolean ended = new AtomicBoolean();
 
-  WorkloadRun(Workload workload, long start, Span span) {
+  WorkloadRun(Workload workload, long start, int slot, Span span) {
     this.workload = workload;
     this.start = start;
+    this.slot = slot;
     this.span = span;
   }
 
@@ -37,7 +40,7 @@ public final class WorkloadRun {
   /** Ends the run as successful. */
   public void succeed() {
     if (ended.compareAndSet(false, true)) {
-      workload.complete(start, span, "success", null, null, null);
+      workload.complete(start, slot, span, "success", null, null, null);
     }
   }
 
@@ -47,7 +50,7 @@ public final class WorkloadRun {
    */
   public void fail(Throwable error) {
     if (ended.compareAndSet(false, true)) {
-      workload.complete(start, span, "failure", Workload.errorTypeOf(error), error, error.getMessage());
+      workload.complete(start, slot, span, "failure", Workload.errorTypeOf(error), error, error.getMessage());
     }
   }
 
@@ -57,14 +60,14 @@ public final class WorkloadRun {
    */
   public void failCode(String code, String description) {
     if (ended.compareAndSet(false, true)) {
-      workload.complete(start, span, "failure", code == null || code.isBlank() ? "unknown" : code, null, description);
+      workload.complete(start, slot, span, "failure", code == null || code.isBlank() ? "unknown" : code, null, description);
     }
   }
 
   /** Ends the run as cancelled, for example on shutdown. Cancelled runs do not count as failures. */
   public void cancel() {
     if (ended.compareAndSet(false, true)) {
-      workload.complete(start, span, "cancelled", null, null, null);
+      workload.complete(start, slot, span, "cancelled", null, null, null);
     }
   }
 }

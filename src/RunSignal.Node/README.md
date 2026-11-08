@@ -52,9 +52,13 @@ OpenTelemetry SDK starts. For an explicit provider, use `new WorkloadRegistry({ 
 | Call | Records |
 |---|---|
 | `w.run(fn, { signal })` | One run. It succeeds when `fn` resolves, is cancelled when `signal` was aborted, and fails otherwise. The run's span is active inside `fn` (with a context manager, which `NodeSDK` registers). |
-| `const run = w.start()` then `run.succeed()` / `fail(err)` / `failCode(code, msg)` / `cancel()` | A run ended by hand. Later calls are ignored. |
+| `const run = w.start()` then `run.succeed()` / `fail(err)` / `failCode(code, msg)` / `cancel()` | A run ended by hand. Later calls are ignored. A run that is never ended stays in progress, so it opens the `hung` alert once it runs past `maxDuration`. |
 | `w.processed(n)` / `w.itemFailed(n)` | Items handled. |
 | `w.beat()` | A heartbeat from a long-running loop. |
+
+While a run is in progress, the `runsignal.workload.active_run_age` gauge reports how long the oldest unfinished
+run has been running (0 when none is), so a run that hangs is alerted on while it is still hanging, not only
+when it finishes. It is reported for workloads that have `maxDuration` or have started a run.
 
 `error.type` is the error's `errorType` property if it has one, then its `code` if that is a string (such as
 `ECONNREFUSED`), then its class name.
