@@ -1,0 +1,68 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": {
+        "name": "InvoiceExport",
+        "namespace": "billing",
+        "annotations": {
+          "runsignal.io/severity": "critical",
+          "runsignal.io/min-processed": "100",
+          "kubectl.kubernetes.io/last-applied-configuration": "{}"
+        }
+      },
+      "spec": {
+        "schedule": "0 2 * * *",
+        "timeZone": "Europe/Istanbul",
+        "jobTemplate": { "spec": { "activeDeadlineSeconds": 1800, "template": { "spec": { "containers": [] } } } }
+      }
+    },
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": { "name": "cache-warm", "namespace": "billing" },
+      "spec": {
+        "schedule": "@hourly",
+        "jobTemplate": { "spec": { "template": { "spec": { "containers": [] } } } }
+      }
+    },
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": {
+        "name": "statement-import",
+        "namespace": "billing",
+        "annotations": {
+          "runsignal.io/workload": "bank-statement-import",
+          "runsignal.io/max-duration": "45m",
+          "runsignal.io/failure-rate": "0.2"
+        }
+      },
+      "spec": {
+        "schedule": "CRON_TZ=Europe/Berlin  */15  6-20 * * 1-5",
+        "jobTemplate": { "spec": { "activeDeadlineSeconds": 600, "template": { "spec": { "containers": [] } } } }
+      }
+    },
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": { "name": "old-report", "namespace": "billing" },
+      "spec": { "schedule": "0 5 * * *", "suspend": true, "jobTemplate": { "spec": {} } }
+    },
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": { "name": "debug-dump", "namespace": "billing", "annotations": { "runsignal.io/ignore": "true" } },
+      "spec": { "schedule": "* * * * *", "jobTemplate": { "spec": {} } }
+    },
+    {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": { "name": "poller", "namespace": "billing" },
+      "spec": { "schedule": "@every 5m", "jobTemplate": { "spec": {} } }
+    }
+  ]
+}

@@ -51,6 +51,29 @@ public class ManifestTests
     }
 
     [Fact]
+    public void Reporting_and_time_zone_are_written_only_when_set()
+    {
+        var manifest = new WorkloadManifest
+        {
+            Service = "reports",
+            Workloads =
+            [
+                new WorkloadManifestEntry { Name = "a", Reporting = WorkloadReporting.PerRun, TimeZone = "Europe/Istanbul" },
+                new WorkloadManifestEntry { Name = "b" },
+            ],
+        };
+
+        var json = manifest.ToJson();
+        Assert.Contains("\"reporting\": \"per-run\"", json);
+        Assert.Contains("\"timeZone\": \"Europe/Istanbul\"", json);
+        Assert.Equal(1, json.Split("reporting").Length - 1); // SDK manifests stay unchanged
+
+        var read = WorkloadManifest.FromJson(json);
+        Assert.Equal(WorkloadReporting.PerRun, read.Workloads[0].Reporting);
+        Assert.Null(read.Workloads[1].Reporting);
+    }
+
+    [Fact]
     public void Manifest_round_trips()
     {
         using var registry = new WorkloadRegistry();

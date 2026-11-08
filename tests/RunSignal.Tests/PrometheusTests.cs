@@ -25,6 +25,19 @@ public class PrometheusTests
         Assert.Equal(File.ReadAllText(Fixture("rules.yml")).ReplaceLineEndings(), rules.ReplaceLineEndings());
     }
 
+    // tests/prometheus/rules-per-run.yml is checked by rules-per-run.test.yml in the same way.
+    [Fact]
+    public void Generated_per_run_rules_match_the_file_promtool_tests()
+    {
+        var manifest = WorkloadManifest.FromJson(File.ReadAllText(Fixture("manifest-per-run.json")));
+
+        var rules = PrometheusRules.Generate([manifest], new AlertOptions(), out var warnings);
+
+        Assert.Empty(warnings);
+        Assert.Equal(File.ReadAllText(Fixture("rules-per-run.yml")).ReplaceLineEndings(), rules.ReplaceLineEndings());
+        Assert.DoesNotContain("RunSignalNotReporting", rules); // silence between runs is normal
+    }
+
     [Fact]
     public void Workloads_without_rules_are_reported()
     {

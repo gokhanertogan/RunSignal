@@ -108,6 +108,20 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 | `minProcessed` | Fewest items a run should process | `low-output` |
 | `failureRateThreshold` | Highest acceptable share of failed runs or items (0–1) | `failure-rate` |
 | `severity` | `info` \| `warning` \| `critical` | Routing (for example critical → on-call) |
+| `timeZone` | IANA time zone the `schedule` runs in, such as `Europe/Istanbul`. Without it, the alert tooling's time zone (UTC by default) applies | (affects `missed`) |
+| `reporting` | `continuous` (default) or `per-run`; see below | (affects how absence is detected) |
+
+### Reporting: continuous and per-run
+
+SDKs instrument long-running processes, which report all the time: `continuous`, the default, which SDKs never
+write. The `since_*` gauges detect `missed` and `stalled`, and silence means the process is down.
+
+A `per-run` workload runs each run in its own short-lived process, such as a command wrapped in `runsignal exec`
+or a Kubernetes CronJob. Signals exist only while a run is in progress, so silence between runs is normal:
+- `missed` means no successful run within the schedule plus grace, counted from the last successful run seen;
+- there is no not-reporting alert, and no `stalled` alert (heartbeats need a long-running process);
+- each run reports with its own `service.instance.id`, so backends that keep cumulative series per instance (Prometheus)
+  see each run as its own series. Alert tooling sums those series instead of taking `increase()` of one.
 
 ## Workload manifest
 

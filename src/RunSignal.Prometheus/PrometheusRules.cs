@@ -48,7 +48,15 @@ public static class PrometheusRules
     {
         var selector = $"job={Label(service)}, runsignal_workload={Label(w.Name)}";
         var notReporting = $"{(int)options.NotReportingAfter.TotalMinutes}m";
+        var perRun = w.Reporting == WorkloadReporting.PerRun;
         var count = 0;
+
+        // How much a counter grew within a window. A long-running process keeps one series, so increase() works.
+        // Per-run workloads export each run as its own series (a new service.instance.id), which increase() cannot
+        // see grow from a single process; the run's final value is its whole contribution, so sum those instead.
+        string Grew(string series, string window) => perRun
+            ? $"{By} (max_over_time({series}[{window}]))"
+            : $"{By} (increase({series}[{window}]))";
         void Rule(string alert, string kind, string expr, string forDuration, string summary)
         {
             Append(yaml, alert, kind, expr, forDuration, w, service, summary);
@@ -60,17 +68,34 @@ public static class PrometheusRules
             try
             {
                 var missed = MissedThreshold.For(w, options)!;
-                Rule("RunSignalMissed", "missed",
-                    $"max by (job, runsignal_workload) ({SinceSuccess}{{{selector}}}) > {Number(missed.Seconds)}",
-                    "1m",
-                    $"{w.Name} has not succeeded for longer than its schedule ({w.Schedule}) allows: {DurationText.Format(missed.Interval)} between runs plus {DurationText.Format(missed.Grace)} grace.");
-                Rule("RunSignalNotReporting", "not-reporting",
-                    $"absent_over_time({SinceSuccess}{{{selector}}}[{notReporting}])",
-                    "0s",
-                    $"{w.Name} has reported nothing for {notReporting}: the service is down or not exporting.");
-                if (w.FailureRateThreshold is null)
-                    Rule("RunSignalFailed", "failed", Increased($"{Runs}{{{selector}, runsignal_outcome=\"failure\"}}", "5m"), "0s",
-                        $"A run of {w.Name} failed.");
+                if (perRun)
+                {
+                    // Silence between runs is normal, so there is no not-reporting rule: only successes count. A
+                    // workload with no success anywhere in four gaps is new (its rule loads before its first run) or
+                    // retired, so it does not alert; New Relic's loss of signal behaves the same way.
+                    var success = $"{Runs}{{{selector}, runsignal_outcome=\"success\"}}";
+                    Rule("RunSignalMissed", "missed",
+                        $"absent_over_time({success}[{Number(missed.Seconds)}s]) and on (job, runsignal_workload) max by (job, runsignal_workload) (max_over_time({success}[{Number(missed.Seconds * 4)}s]))",
+                        "0s",
+                        $"{w.Name} has not succeeded for longer than its schedule ({w.Schedule}) allows: {DurationText.Format(missed.Interval)} between runs plus {DurationText.Format(missed.Grace)} grace.");
+                    if (w.FailureRateThreshold is null)
+                        Rule("RunSignalFailed", "failed", $"{Grew($"{Runs}{{{selector}, runsignal_outcome=\"failure\"}}", "5m")} > 0", "0s",
+                            $"A run of {w.Name} failed.");
+                }
+                else
+                {
+                    Rule("RunSignalMissed", "missed",
+                        $"max by (job, runsignal_workload) ({SinceSuccess}{{{selector}}}) > {Number(missed.Seconds)}",
+                        "1m",
+                        $"{w.Name} has not succeeded for longer than its schedule ({w.Schedule}) allows: {DurationText.Format(missed.Interval)} between runs plus {DurationText.Format(missed.Grace)} grace.");
+                    Rule("RunSignalNotReporting", "not-reporting",
+                        $"absent_over_time({SinceSuccess}{{{selector}}}[{notReporting}])",
+                        "0s",
+                        $"{w.Name} has reported nothing for {notReporting}: the service is down or not exporting.");
+                    if (w.FailureRateThreshold is null)
+                        Rule("RunSignalFailed", "failed", Increased($"{Runs}{{{selector}, runsignal_outcome=\"failure\"}}", "5m"), "0s",
+                            $"A run of {w.Name} failed.");
+                }
             }
             catch (FormatException ex)
             {
@@ -78,7 +103,11 @@ public static class PrometheusRules
             }
         }
 
-        if (w.ExpectEverySeconds is { } expectEvery)
+        if (w.ExpectEverySeconds is not null && perRun)
+        {
+            warnings.Add($"{w.Name}: no stalled rule, because heartbeats need a long-running process and the workload reports per run.");
+        }
+        else if (w.ExpectEverySeconds is { } expectEvery)
         {
             Rule("RunSignalStalled", "stalled",
                 $"max by (job, runsignal_workload) ({SinceHeartbeat}{{{selector}}}) > {Number(expectEvery)}",
@@ -98,7 +127,7 @@ public static class PrometheusRules
             if (bucket is { } le)
             {
                 Rule("RunSignalOverrun", "overrun",
-                    $"{By} (increase({DurationBucket}{{{selector}, le=\"+Inf\"}}[5m])) - {By} (increase({DurationBucket}{{{selector}, le=\"{Number(le)}\"}}[5m])) > 0",
+                    $"{Grew($"{DurationBucket}{{{selector}, le=\"+Inf\"}}", "5m")} - {Grew($"{DurationBucket}{{{selector}, le=\"{Number(le)}\"}}", "5m")} > 0",
                     "0s",
                     $"A run of {w.Name} took longer than {DurationText.Format(TimeSpan.FromSeconds(le))} (limit {DurationText.Format(TimeSpan.FromSeconds(maxDuration))}, rounded up to a histogram bucket).");
             }
@@ -117,7 +146,7 @@ public static class PrometheusRules
         if (w.MinProcessed is { } minProcessed)
         {
             Rule("RunSignalLowOutput", "low-output",
-                $"{By} (increase({Items}{{{selector}, runsignal_item_result=\"processed\"}}[1h])) / {By} (increase({Runs}{{{selector}, runsignal_outcome=\"success\"}}[1h])) < {minProcessed}",
+                $"{Grew($"{Items}{{{selector}, runsignal_item_result=\"processed\"}}", "1h")} / {Grew($"{Runs}{{{selector}, runsignal_outcome=\"success\"}}", "1h")} < {minProcessed}",
                 "0s",
                 $"Successful runs of {w.Name} processed fewer than {minProcessed} items on average in the last hour.");
         }
@@ -126,11 +155,11 @@ public static class PrometheusRules
         {
             var percent = (rate * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%";
             Rule("RunSignalFailureRate", "failure-rate",
-                $"{By} (increase({Runs}{{{selector}, runsignal_outcome=\"failure\"}}[15m])) / {By} (increase({Runs}{{{selector}, runsignal_outcome=~\"success|failure\"}}[15m])) > {Number(rate)}",
+                $"{Grew($"{Runs}{{{selector}, runsignal_outcome=\"failure\"}}", "15m")} / {Grew($"{Runs}{{{selector}, runsignal_outcome=~\"success|failure\"}}", "15m")} > {Number(rate)}",
                 "0s",
                 $"More than {percent} of the runs of {w.Name} failed in the last 15 minutes.");
             Rule("RunSignalItemFailureRate", "item-failure-rate",
-                $"{By} (increase({Items}{{{selector}, runsignal_item_result=\"failed\"}}[15m])) / {By} (increase({Items}{{{selector}}}[15m])) > {Number(rate)}",
+                $"{Grew($"{Items}{{{selector}, runsignal_item_result=\"failed\"}}", "15m")} / {Grew($"{Items}{{{selector}}}", "15m")} > {Number(rate)}",
                 "0s",
                 $"More than {percent} of the items {w.Name} handled failed in the last 15 minutes.");
         }

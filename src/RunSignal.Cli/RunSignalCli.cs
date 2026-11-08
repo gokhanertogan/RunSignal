@@ -13,7 +13,9 @@ internal static class RunSignalCli
     /// <param name="output">Where results go.</param>
     /// <param name="error">Where errors go.</param>
     /// <param name="handler">The HTTP handler for NerdGraph; tests pass a fake.</param>
-    public static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, HttpMessageHandler? handler = null)
+    /// <param name="configureExecMetrics">Replaces the OTLP exporter of <c>exec</c>; tests pass an in-memory one.</param>
+    public static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, HttpMessageHandler? handler = null,
+        Action<OpenTelemetry.Metrics.MeterProviderBuilder>? configureExecMetrics = null)
     {
         var manifests = new Argument<FileInfo[]>("manifests")
         {
@@ -177,7 +179,7 @@ internal static class RunSignalCli
 
         var export = new Command("export", "Write alert rules and dashboards for backends RunSignal does not provision directly.") { prometheus, grafana };
 
-        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision, destroy, export };
+        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision, destroy, export, ExecCommand.Create(error, configureExecMetrics), DiscoverCommand.Create(output, error, Guarded) };
         return await root.Parse(args).InvokeAsync().ConfigureAwait(false);
 
         // Expected failures (a missing file, a bad cron, an API error) print one line instead of a stack trace.

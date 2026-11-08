@@ -51,6 +51,18 @@ public sealed record WorkloadManifestEntry
     /// <inheritdoc cref="WorkloadOptions.Severity"/>
     public Severity Severity { get; init; } = Severity.Warning;
 
+    /// <summary>
+    /// How the workload's signals arrive. <see langword="null"/> means <see cref="WorkloadReporting.Continuous"/>:
+    /// a long-running process reports all the time. SDKs never set it.
+    /// </summary>
+    public WorkloadReporting? Reporting { get; init; }
+
+    /// <summary>
+    /// The IANA time zone the schedule runs in, such as <c>Europe/Istanbul</c>. <see langword="null"/> uses the
+    /// time zone given to the alert tooling (UTC by default).
+    /// </summary>
+    public string? TimeZone { get; init; }
+
     internal static WorkloadManifestEntry From(Workload workload)
     {
         var o = workload.Options;
@@ -71,9 +83,29 @@ public sealed record WorkloadManifestEntry
     WriteIndented = true,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    Converters = [typeof(SeverityJsonConverter)])]
+    Converters = [typeof(SeverityJsonConverter), typeof(WorkloadReportingJsonConverter)])]
 [JsonSerializable(typeof(WorkloadManifest))]
 internal sealed partial class WorkloadManifestJsonContext : JsonSerializerContext;
 
 // Writes severities as "info", "warning" and "critical", as the spec defines them.
 internal sealed class SeverityJsonConverter() : JsonStringEnumConverter<Severity>(JsonNamingPolicy.CamelCase, allowIntegerValues: false);
+
+// Writes "continuous" and "per-run".
+internal sealed class WorkloadReportingJsonConverter() : JsonStringEnumConverter<WorkloadReporting>(JsonNamingPolicy.KebabCaseLower, allowIntegerValues: false);
+
+/// <summary>How a workload's signals arrive, which decides how absence is detected.</summary>
+public enum WorkloadReporting
+{
+    /// <summary>
+    /// A long-running process records the workload and reports all the time, so the <c>since_*</c> gauges show
+    /// missed runs and stalls, and silence means the process is down. Every SDK-instrumented workload is like this.
+    /// </summary>
+    Continuous,
+
+    /// <summary>
+    /// Each run is its own short-lived process, such as a command wrapped in <c>runsignal exec</c> or a Kubernetes
+    /// CronJob. Signals exist only while a run is in progress, so silence between runs is normal: a missed run is
+    /// one with no successful run within the schedule plus grace.
+    /// </summary>
+    PerRun,
+}

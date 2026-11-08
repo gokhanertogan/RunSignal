@@ -34,7 +34,15 @@
         "expectEverySeconds": { "type": "number", "exclusiveMinimum": 0, "description": "Produces the stalled alert." },
         "minProcessed": { "type": "integer", "minimum": 1, "description": "Produces the low-output alert." },
         "failureRateThreshold": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "Produces the failure-rate alert." },
-        "severity": { "enum": ["info", "warning", "critical"] }
+        "severity": { "enum": ["info", "warning", "critical"] },
+        "reporting": {
+          "enum": ["continuous", "per-run"],
+          "description": "How signals arrive. continuous (the default, and what SDKs write): a long-running process reports all the time. per-run: each run is its own short-lived process (runsignal exec, a Kubernetes CronJob), so silence between runs is normal and a missed run is detected from successful runs instead of the since_success gauge."
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "IANA time zone the schedule runs in, such as Europe/Istanbul. Defaults to the time zone given to the alert tooling (UTC)."
+        }
       }
     }
   }

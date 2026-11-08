@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "service": "reports",
+  "workloads": [
+    {
+      "name": "hourly-export",
+      "schedule": "0 * * * *",
+      "maxDurationSeconds": 600,
+      "minProcessed": 10,
+      "severity": "critical",
+      "reporting": "per-run"
+    }
+  ]
+}

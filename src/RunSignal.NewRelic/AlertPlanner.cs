@@ -28,25 +28,54 @@ public static class AlertPlanner
             var conditions = bySeverity[workload.Severity];
             var where = $"service.name = {Quote(manifest.Service)} AND {Attributes.Workload} = {Quote(workload.Name)}";
             var before = conditions.Count;
+            var perRun = workload.Reporting == WorkloadReporting.PerRun;
 
             if (workload.Schedule is { } schedule)
             {
                 try
                 {
                     var (interval, grace) = MissedThreshold.For(workload, options.ToAlertOptions())!;
-                    conditions.Add(new AlertCondition
+                    var missedAfter = Math.Round((interval + grace).TotalSeconds);
+                    if (perRun && missedAfter > MaxLossOfSignalSeconds)
                     {
-                        Name = $"{workload.Name}: missed",
-                        Workload = workload.Name,
-                        Kind = AlertKind.Missed,
-                        Description = $"{ManagedMarker} {workload.Name} has not succeeded for longer than its schedule ({schedule}) allows: {Format(interval)} between runs plus {Format(grace)} grace. Also opens when the service stops reporting for {Format(TimeSpan.FromSeconds(notReporting))}.",
-                        Nrql = $"SELECT max({Instruments.SinceSuccess}) FROM Metric WHERE {where}",
-                        Above = true,
-                        Threshold = Math.Round((interval + grace).TotalSeconds),
-                        AggregationWindowSeconds = 60,
-                        AggregationMethod = AggregationMethod.EventFlow,
-                        LossOfSignalSeconds = notReporting,
-                    });
+                        warnings.Add($"{workload.Name}: no missed-run alert, because New Relic cannot wait {Format(TimeSpan.FromSeconds(missedAfter))} for a run: loss of signal is limited to {Format(TimeSpan.FromSeconds(MaxLossOfSignalSeconds))}.");
+                    }
+                    else if (perRun)
+                    {
+                        // Each run is its own process, so silence between runs is normal and since_success is only
+                        // reported during a run. Only successful runs produce data here; when none arrives within
+                        // the schedule plus grace, loss of signal opens the incident. The threshold never fires.
+                        conditions.Add(new AlertCondition
+                        {
+                            Name = $"{workload.Name}: missed",
+                            Workload = workload.Name,
+                            Kind = AlertKind.Missed,
+                            Description = $"{ManagedMarker} {workload.Name} has not succeeded for longer than its schedule ({schedule}) allows: {Format(interval)} between runs plus {Format(grace)} grace. Each run is its own process, so this opens only after a first successful run has been seen.",
+                            Nrql = $"SELECT sum({Instruments.Runs}) FROM Metric WHERE {where} AND {Attributes.Outcome} = 'success'",
+                            Above = false,
+                            Threshold = 1,
+                            AggregationWindowSeconds = 60,
+                            AggregationMethod = AggregationMethod.EventTimer,
+                            AggregationTimerSeconds = 60,
+                            LossOfSignalSeconds = (int)missedAfter,
+                        });
+                    }
+                    else
+                    {
+                        conditions.Add(new AlertCondition
+                        {
+                            Name = $"{workload.Name}: missed",
+                            Workload = workload.Name,
+                            Kind = AlertKind.Missed,
+                            Description = $"{ManagedMarker} {workload.Name} has not succeeded for longer than its schedule ({schedule}) allows: {Format(interval)} between runs plus {Format(grace)} grace. Also opens when the service stops reporting for {Format(TimeSpan.FromSeconds(notReporting))}.",
+                            Nrql = $"SELECT max({Instruments.SinceSuccess}) FROM Metric WHERE {where}",
+                            Above = true,
+                            Threshold = missedAfter,
+                            AggregationWindowSeconds = 60,
+                            AggregationMethod = AggregationMethod.EventFlow,
+                            LossOfSignalSeconds = notReporting,
+                        });
+                    }
 
                     if (workload.FailureRateThreshold is null)
                     {
@@ -71,7 +100,11 @@ public static class AlertPlanner
                 }
             }
 
-            if (workload.ExpectEverySeconds is { } expectEvery)
+            if (workload.ExpectEverySeconds is not null && perRun)
+            {
+                warnings.Add($"{workload.Name}: no stalled alert, because heartbeats need a long-running process and the workload reports per run.");
+            }
+            else if (workload.ExpectEverySeconds is { } expectEvery)
             {
                 conditions.Add(new AlertCondition
                 {

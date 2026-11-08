@@ -10,17 +10,20 @@
 
     <PackageId>RunSignal.Cli</PackageId>
     <Title>RunSignal CLI: provision alerts for background jobs from a workload manifest</Title>
-    <Description>The runsignal command: plan, diff and provision New Relic alerts, or export Prometheus alerting rules (missed, overrun, stalled, low-output and failure-rate), for the background jobs listed in RunSignal workload manifests. Idempotent and safe to run in CI.</Description>
+    <Description>The runsignal command: plan, diff and provision New Relic alerts, or export Prometheus alerting rules (missed, overrun, stalled, low-output and failure-rate), for the background jobs listed in RunSignal workload manifests. Also runs scripts and Kubernetes CronJobs as monitored workloads (runsignal exec) and writes manifests from CronJobs (runsignal discover kubernetes). Idempotent and safe to run in CI.</Description>
     <PackageTags>$(PackageTags);cli;dotnet-tool;nerdgraph;alerts-as-code</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.15.3" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\RunSignal.NewRelic\RunSignal.NewRelic.csproj" />
     <ProjectReference Include="..\RunSignal.Prometheus\RunSignal.Prometheus.csproj" />
+    <ProjectReference Include="..\RunSignal.OpenTelemetry\RunSignal.OpenTelemetry.csproj" />
   </ItemGroup>
 
   <ItemGroup>
