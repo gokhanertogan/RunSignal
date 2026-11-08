@@ -99,6 +99,12 @@ internal static class ExecCommand
             {
                 configureMetrics(builder);
             }
+            else if (HttpsWithoutOpenSsl())
+            {
+                // .NET terminates the process when TLS needs OpenSSL and it is missing. That would replace the command's
+                // exit code with a crash after the command already ran, so the run is not exported instead.
+                await error.WriteLineAsync("runsignal: warning: the OTLP endpoint uses HTTPS, which needs OpenSSL (libssl), and this image has none, so the run is not exported. Install it, for example apt-get install libssl3 ca-certificates.").ConfigureAwait(false);
+            }
             else
             {
                 builder.AddOtlpExporter((_, reader) =>
@@ -198,6 +204,28 @@ internal static class ExecCommand
 
     [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
     private static extern int Kill(int pid, int signal);
+
+    // The libssl names .NET looks for on Linux, newest first.
+    private static readonly string[] s_libSsl = ["libssl.so.3", "libssl.so.1.1", "libssl.so.1.0.2", "libssl.so.1.0.0", "libssl.so.10", "libssl.so"];
+
+    private static bool HttpsWithoutOpenSsl()
+    {
+        if (!OperatingSystem.IsLinux())
+            return false;
+        var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+                       ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+        if (endpoint is null || !endpoint.TrimStart().StartsWith("https:", StringComparison.OrdinalIgnoreCase))
+            return false;
+        foreach (var name in s_libSsl)
+        {
+            if (NativeLibrary.TryLoad(name, out var handle))
+            {
+                NativeLibrary.Free(handle);
+                return false;
+            }
+        }
+        return true;
+    }
 
     internal static MetricReaderTemporalityPreference ParseTemporality(string? value) => value?.Trim().ToLowerInvariant() switch
     {

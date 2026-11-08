@@ -43,6 +43,7 @@ output and failure rate.
 | Python | [`runsignal`](https://pypi.org/project/runsignal/) | `pip install runsignal` |
 | Rust | [`runsignal`](https://crates.io/crates/runsignal) | `cargo add runsignal` |
 | CLI | [`RunSignal.Cli`](https://www.nuget.org/packages/RunSignal.Cli) | `dotnet tool install -g RunSignal.Cli` |
+| CLI, without .NET | [release assets](https://github.com/gokhanertogan/RunSignal/releases) and [`ghcr.io/gokhanertogan/runsignal`](https://github.com/gokhanertogan/RunSignal/pkgs/container/runsignal) | a native executable for Linux (glibc and musl, x64 and arm64), macOS and Windows |
 
 ## Why RunSignal
 
@@ -310,8 +311,34 @@ Silence between runs is normal, so the alerts work differently:
 | `failed`, `overrun`, `hung`, `low output`, failure rates | ✅ | ✅ |
 | Limits | | New Relic: `missed` needs a run at least every 48 hours (loss of signal). Prometheus: the alert closes four schedule gaps after the last success. |
 
-**Kubernetes CronJobs.** Run the container's command through `runsignal exec`, then write the manifest from the
-cluster:
+**Getting `runsignal` into an image.** It is a native executable of about 10 MB with no .NET dependency. Copy it from
+the container image:
+
+```dockerfile
+COPY --from=ghcr.io/gokhanertogan/runsignal:latest /runsignal /usr/local/bin/runsignal        # Debian, Ubuntu, RHEL
+COPY --from=ghcr.io/gokhanertogan/runsignal:latest /runsignal-musl /usr/local/bin/runsignal   # Alpine
+```
+
+- **Requirements:** the glibc build needs glibc 2.28 or later (Debian 10+, Ubuntu 20.04+, RHEL 8+, Amazon Linux 2023).
+- **HTTPS export:** needs OpenSSL (`libssl`) and CA certificates, which most language images include. Without
+  `libssl`, `runsignal exec` warns, still runs the command and returns its exit code, but does not export.
+- **Elsewhere:** download an archive from the releases.
+
+**Kubernetes CronJobs.** Run the container's command through `runsignal exec`:
+
+```yaml
+containers:
+  - name: invoice-export
+    image: registry.example.com/billing/invoice-export:1.4
+    command: ["runsignal", "exec", "--workload", "invoice-export", "--", "python", "export.py"]
+    env:
+      - { name: OTEL_SERVICE_NAME, value: billing }
+      - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability:4318" }
+      - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: http/protobuf }
+```
+
+`runsignal` runs as PID 1 and forwards the SIGTERM Kubernetes sends at `activeDeadlineSeconds` or on deletion, so a
+stopped job is recorded as cancelled. Then write the manifest from the cluster:
 
 ```sh
 runsignal discover kubernetes --service billing --namespace billing -o billing.json
