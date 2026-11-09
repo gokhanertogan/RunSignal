@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>Gokhan Ertogan</Authors>
     <Copyright>Copyright (c) 2026 Gokhan Ertogan</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
