@@ -9,7 +9,7 @@ internal sealed class WorkloadInstruments
 
     internal static string Version => typeof(WorkloadInstruments).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
-    public WorkloadInstruments(Meter meter, Func<IEnumerable<Measurement<double>>> observeSinceSuccess, Func<IEnumerable<Measurement<double>>> observeSinceHeartbeat)
+    public WorkloadInstruments(Meter meter, Func<IEnumerable<Measurement<double>>> observeSinceSuccess, Func<IEnumerable<Measurement<double>>> observeSinceHeartbeat, Func<IEnumerable<Measurement<double>>> observeActiveRunAge)
     {
         Runs = meter.CreateCounter<long>(RunSignalTelemetry.Instruments.Runs, "{run}", "Completed runs of a workload.");
         Duration = meter.CreateHistogram<double>(RunSignalTelemetry.Instruments.Duration, "s", "Duration of workload runs.");
@@ -17,6 +17,7 @@ internal sealed class WorkloadInstruments
         Heartbeats = meter.CreateCounter<long>(RunSignalTelemetry.Instruments.Heartbeats, "{heartbeat}", "Heartbeats of long-running workloads.");
         meter.CreateObservableGauge(RunSignalTelemetry.Instruments.SinceSuccess, observeSinceSuccess, "s", "Seconds since the last successful run of a workload, or since it was registered.");
         meter.CreateObservableGauge(RunSignalTelemetry.Instruments.SinceHeartbeat, observeSinceHeartbeat, "s", "Seconds since the last heartbeat of a workload, or since it was registered.");
+        meter.CreateObservableGauge(RunSignalTelemetry.Instruments.ActiveRunAge, observeActiveRunAge, "s", "Seconds the oldest unfinished run of a workload has been running, or 0 while none is.");
     }
 
     public Counter<long> Runs { get; }

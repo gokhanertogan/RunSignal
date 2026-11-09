@@ -36,7 +36,15 @@ type Workload struct {
 	lastHeartbeat atomic.Int64
 	hasStarted    atomic.Bool
 	hasBeaten     atomic.Bool
+
+	// Start times of the runs in progress, 0 for a free slot. Allocated on the first run. A run claims a slot when
+	// it starts and frees it when it ends, so the oldest one gives active_run_age without allocating per run.
+	activeRuns atomic.Pointer[[activeRunSlots]atomic.Int64]
 }
+
+// activeRunSlots is how many concurrent runs per workload active_run_age tracks. Runs started while every slot
+// is taken are not tracked, so with more concurrent runs the reported age is a lower bound.
+const activeRunSlots = 64
 
 func newWorkload(r *Registry, name string, e Expectations) *Workload {
 	nameAttr := attribute.String(AttributeWorkload, name)
@@ -91,22 +99,56 @@ func (w *Workload) Start(ctx context.Context) (context.Context, Run) {
 	if !w.hasStarted.Load() {
 		w.hasStarted.Store(true)
 	}
-	return ctx, Run{workload: w, ctx: ctx, start: w.registry.now(), span: span}
+	start := max(w.registry.now(), 1) // 0 marks a free slot
+	return ctx, Run{workload: w, ctx: ctx, start: start, slot: w.trackStart(start), span: span}
+}
+
+// trackStart claims a free slot for a run that started at start and returns it, or -1 when every slot is
+// taken; such a run is not tracked.
+func (w *Workload) trackStart(start int64) int {
+	runs := w.activeRuns.Load()
+	if runs == nil {
+		w.activeRuns.CompareAndSwap(nil, new([activeRunSlots]atomic.Int64))
+		runs = w.activeRuns.Load()
+	}
+	for i := range runs {
+		if runs[i].Load() == 0 && runs[i].CompareAndSwap(0, start) {
+			return i
+		}
+	}
+	return -1
+}
+
+// trackEnd frees the run's slot only if it still holds this run, so ending a run twice cannot end a newer run.
+func (w *Workload) trackEnd(start int64, slot int) {
+	if slot < 0 {
+		return
+	}
+	if runs := w.activeRuns.Load(); runs != nil {
+		runs[slot].CompareAndSwap(start, 0)
+	}
 }
 
 // Run runs fn as one run of the workload: the run succeeds when fn returns nil, is cancelled when fn returns
 // because ctx was cancelled, and fails otherwise. fn's error is returned. A panic in fn fails the run and is
-// re-raised.
+// re-raised. If fn calls runtime.Goexit (as testing's t.FailNow does), the run fails with the error type
+// "goexit", so it does not stay in progress.
 func (w *Workload) Run(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	runCtx, run := w.Start(ctx)
+	returned := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			run.Fail(fmt.Errorf("panic: %v", recovered))
 			panic(recovered)
 		}
+		// Neither a return nor a panic: runtime.Goexit is unwinding this goroutine.
+		if !returned {
+			run.FailCode("goexit", "runtime.Goexit was called during the run")
+		}
 	}()
 
 	err = fn(runCtx)
+	returned = true
 	switch {
 	case err == nil:
 		run.Succeed()
@@ -154,13 +196,33 @@ func (w *Workload) secondsSinceHeartbeat(now int64) (float64, bool) {
 	return time.Duration(now - w.lastHeartbeat.Load()).Seconds(), w.hasBeaten.Load() || w.expectations.ExpectEvery > 0
 }
 
+// Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum duration
+// or have run, so the hung alert has a value to evaluate, and closes, while nothing is running.
+func (w *Workload) activeRunAge(now int64) (float64, bool) {
+	var seconds float64
+	if runs := w.activeRuns.Load(); runs != nil {
+		oldest := int64(0)
+		for i := range runs {
+			if start := runs[i].Load(); start != 0 && (oldest == 0 || start < oldest) {
+				oldest = start
+			}
+		}
+		if oldest != 0 {
+			seconds = max(time.Duration(now-oldest).Seconds(), 0)
+		}
+	}
+	return seconds, w.hasStarted.Load() || w.expectations.MaxDuration > 0
+}
+
 // Run is one run of a Workload, started with Workload.Start. End it with exactly one call to Succeed, Fail,
 // FailCode or Cancel. It is a value so that starting a run does not allocate; ending it more than once records
-// it more than once. A run that is never ended records nothing, which the backend sees as a missed run.
+// it more than once. A run that is never ended stays in progress: it reports a growing active_run_age, which
+// opens the hung alert once it passes the workload's MaxDuration.
 type Run struct {
 	workload *Workload
 	ctx      context.Context
 	start    int64
+	slot     int        // slot in Workload.activeRuns, -1 when untracked
 	span     trace.Span // nil when tracing is off
 }
 
@@ -178,6 +240,7 @@ func (r Run) Succeed() {
 		return
 	}
 	w := r.workload
+	w.trackEnd(r.start, r.slot)
 	now := w.registry.now()
 	w.registry.runs.Add(r.ctx, 1, w.success...)
 	w.registry.duration.Record(r.ctx, time.Duration(now-r.start).Seconds(), w.successRecord...)
@@ -222,6 +285,7 @@ func (r Run) Cancel() {
 		return
 	}
 	w := r.workload
+	w.trackEnd(r.start, r.slot)
 	w.registry.runs.Add(r.ctx, 1, w.cancelled...)
 	w.registry.duration.Record(r.ctx, time.Duration(w.registry.now()-r.start).Seconds(), w.cancelledRecord...)
 	if r.span != nil {
@@ -237,6 +301,7 @@ func (r Run) fail(errorType, description string, err error) {
 		return
 	}
 	w := r.workload
+	w.trackEnd(r.start, r.slot)
 	set := attribute.NewSet(w.nameAttribute, attribute.String(AttributeOutcome, "failure"), attribute.String(AttributeErrorType, errorType))
 	w.registry.runs.Add(r.ctx, 1, metric.WithAttributeSet(set))
 	w.registry.duration.Record(r.ctx, time.Duration(w.registry.now()-r.start).Seconds(), w.failureRecord...)

@@ -78,7 +78,9 @@ public sealed class RunSignalJobListener : IJobListener
     /// <inheritdoc />
     public ListenerTask JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
-        s_running.TryRemove(RunId(context), out _);
+        // Quartz vetoes before JobToBeExecuted, but a run started here must not stay in progress forever.
+        if (s_running.TryRemove(RunId(context), out var running))
+            running.Run.Discard();
         return ListenerTask.CompletedTask;
     }
 

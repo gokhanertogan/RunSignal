@@ -16,6 +16,7 @@ public static class PrometheusRules
     private const string DurationBucket = "runsignal_workload_duration_seconds_bucket";
     private const string SinceSuccess = "runsignal_workload_since_success_seconds";
     private const string SinceHeartbeat = "runsignal_workload_since_heartbeat_seconds";
+    private const string ActiveRunAge = "runsignal_workload_active_run_age_seconds";
     private const string By = "sum by (job, runsignal_workload)";
 
     /// <summary>Generates the rules file. <paramref name="warnings"/> lists expectations that produced no rule, and why.</summary>
@@ -103,8 +104,14 @@ public static class PrometheusRules
             }
             else
             {
-                warnings.Add($"{w.Name}: no overrun rule, because {maxDuration}s is above the largest duration bucket.");
+                warnings.Add($"{w.Name}: no overrun rule, because {maxDuration}s is above the largest duration bucket. The hung rule still applies.");
             }
+
+            // The gauge is exact, so unlike overrun it needs no bucket rounding.
+            Rule("RunSignalHung", "hung",
+                $"max by (job, runsignal_workload) ({ActiveRunAge}{{{selector}}}) > {Number(maxDuration)}",
+                "1m",
+                $"A run of {w.Name} has been running for longer than {DurationText.Format(TimeSpan.FromSeconds(maxDuration))} and has not finished: it may be hung, or the code never ends the run.");
         }
 
         if (w.MinProcessed is { } minProcessed)

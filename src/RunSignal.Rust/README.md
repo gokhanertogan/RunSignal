@@ -43,9 +43,13 @@ invoices.run(|| {
 })?;
 ```
 
-`Registry::global()` reads the global meter provider on first use, not when it is created: a meter taken before
-`global::set_meter_provider` stays a no-op for good. So create registries freely, but record only after the
-SDK is set up. `Registry::with_meter(meter)` takes an explicit meter.
+`Registry::global()` follows the global meter provider: registering a workload or recording picks up a provider
+installed since the registry was created, so create registries freely. Registering a workload makes its gauges
+observable right away, so a scheduled job that never runs is still reported as missed. If you register
+workloads *before* `global::set_meter_provider`, call `registry.refresh_meter_provider()` once the provider is
+set, or a workload that records nothing for a while (a nightly job) reports no gauges until its first run.
+Set the global provider once: a registry stops following it after it has collected the gauges.
+`Registry::with_meter(meter)` takes an explicit meter.
 
 ## Recording work
 
@@ -53,9 +57,15 @@ SDK is set up. `Registry::with_meter(meter)` takes an explicit meter.
 |---|---|
 | `w.run(\|\| ...)` | One run. It succeeds on `Ok` and fails on `Err`; the result passes through. The run's span is current inside. |
 | `w.run_async(future).await` | The same for async work. A future dropped before it completes (shutdown, timeout) records a cancelled run. |
-| `let run = w.start()` then `run.succeed()` / `fail(&err)` / `fail_code(code, msg)` / `cancel()` | A run ended by hand. Each takes the run by value, so it cannot be recorded twice. |
+| `let run = w.start()` then `run.succeed()` / `fail(&err)` / `fail_code(code, msg)` / `cancel()` | A run ended by hand. Each takes the run by value, so it cannot be recorded twice. A run dropped without being ended records no outcome. |
 | `w.processed(n)` / `w.item_failed(n)` | Items handled. |
 | `w.beat()` | A heartbeat from a long-running loop. |
+
+A run counts as in progress from `start()` until it is ended or dropped. The `runsignal.workload.active_run_age`
+gauge reports how long the oldest run in progress has been running (0 when none is), so the `hung` alert fires
+while a run is still hanging rather than only after it finishes. It is reported for workloads with a
+`max_duration` or that have started a run. Up to 64 concurrent runs per workload are tracked; beyond that the
+reported age is a lower bound. A run that is leaked (`std::mem::forget`) stays in progress for good.
 
 `error.type` is the compiler's name for the error type (`std::any::type_name`), which can change between Rust
 versions: `std::io::Error` is reported as `core::io::error::Error` since Rust 1.9x. Use `fail_code` when

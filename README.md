@@ -24,7 +24,7 @@ HTTP request at all:
 
 RunSignal records the **runs, items and heartbeats** of background work as OpenTelemetry metrics, with the same
 names in .NET, Go, Java, Node.js, Python and Rust. From a manifest of what each job is expected to do, it
-**provisions the alerts and dashboards** in your observability backend: missed, failed, overrun, stalled, low
+**provisions the alerts and dashboards** in your observability backend: missed, failed, overrun, hung, stalled, low
 output and failure rate.
 
 > **Status: 0.1.** Everything below works and is tested, including end to end against a live New Relic account
@@ -50,6 +50,7 @@ output and failure rate.
 |---|---|---|
 | How it works | Each job pings a monitoring service | Jobs emit OpenTelemetry metrics to the backend you already use |
 | Missed, failed and overrunning runs | ✅ | ✅ |
+| A run that hangs and never finishes | rarely (only as a missed ping) | ✅ `hung`, while it is still hanging |
 | Stalled consumers and loops | ✅ with heartbeat pings | ✅ with heartbeats |
 | "Succeeded, but processed 0 rows" | rarely | ✅ `minProcessed` |
 | Failure rate across many runs, by error type | rarely | ✅ |
@@ -113,7 +114,7 @@ that it is missing.
 | Expectation | Example | Alert |
 |---|---|---|
 | `schedule` | `0 2 * * *` | **missed**: no success within the schedule plus grace; **failed**: a run failed |
-| `maxDuration` | 30 minutes | **overrun**: a run took longer |
+| `maxDuration` | 30 minutes | **overrun**: a run took longer; **hung**: a run has been running longer and has not finished |
 | `expectEvery` | 5 minutes | **stalled**: no heartbeat in time |
 | `minProcessed` | 100 | **low output**: runs processed fewer items |
 | `failureRateThreshold` | 0.2 | **failure rate**: too many failed runs or items |
@@ -302,6 +303,7 @@ The action installs the `runsignal` CLI and runs `command`; any CLI command work
 | `failed` | A run failed (scheduled workloads without a failure-rate threshold) | ✅ | ✅ |
 | `stalled` | No heartbeat for longer than `expectEvery` | ✅ | ✅ |
 | `overrun` | A run took longer than `maxDuration` | ✅ | ✅ (rounded up to a histogram bucket) |
+| `hung` | A run has been in progress for longer than `maxDuration` and has not finished | ✅ | ✅ |
 | `low output` | Successful runs processed fewer than `minProcessed` items on average within an hour | ✅ | ✅ |
 | `failure rate` / `item failure rate` | More than `failureRateThreshold` of runs / items failed within 15 minutes | ✅ | ✅ |
 | `not reporting` | The service sent nothing for 15 minutes (it is down, or never started) | as loss of signal on `missed` / `stalled` | `RunSignalNotReporting` |
@@ -325,8 +327,8 @@ Every alert kind has fired on a live New Relic account, and every Prometheus rul
 
 To check that every alert reaches you before a real job fails, run the
 [alert drill](samples/RunSignal.Samples.AlertDrill). It breaks one expectation per workload. On New Relic,
-overrun and stalled open within about 5 minutes, the failure rates within about 30 minutes, and low output once
-its hour closes.
+overrun and stalled open within about 5 minutes, hung about 3 minutes after start, the failure rates within about
+30 minutes, and low output once its hour closes.
 
 ### Prometheus and Grafana
 
@@ -379,10 +381,13 @@ Every SDK emits the same instruments on the meter `RunSignal`:
 | `runsignal.workload.heartbeats` | counter | `runsignal.workload` |
 | `runsignal.workload.since_success` | gauge (s) | `runsignal.workload` |
 | `runsignal.workload.since_heartbeat` | gauge (s) | `runsignal.workload` |
+| `runsignal.workload.active_run_age` | gauge (s) | `runsignal.workload` |
 
 The `since_*` gauges count from registration until the first success or heartbeat. A job that never runs
 therefore still looks overdue, which matters because backends only notice that a signal stopped if it was seen
-at least once. Runs are also recorded as spans.
+at least once. `active_run_age` is the age of the oldest run still in progress (0 when none is), so a run that
+hangs opens the `hung` alert while it is hanging, instead of never reaching the duration histogram. Runs are
+also recorded as spans.
 
 The contract is in [spec/README.md](spec/README.md). The SDKs are held to it by the shared
 [conformance vectors](spec/conformance), which every SDK's test suite runs:

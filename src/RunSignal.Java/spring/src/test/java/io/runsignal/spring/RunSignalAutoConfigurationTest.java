@@ -111,7 +111,12 @@ class RunSignalAutoConfigurationTest {
     }
 
     Map<String, Long> runs = new HashMap<>();
+    Map<String, Double> activeRunAge = new HashMap<>();
     for (MetricData metric : reader.collectAllMetrics()) {
+      if (metric.getName().equals("runsignal.workload.active_run_age")) {
+        metric.getDoubleGaugeData().getPoints().forEach(p -> activeRunAge.put(
+            p.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("runsignal.workload")), p.getValue()));
+      }
       if (metric.getName().equals("runsignal.workload.runs")) {
         metric.getLongSumData().getPoints().forEach(p -> runs.merge(
             p.getAttributes().asMap().values().stream().map(String::valueOf).sorted().reduce((a, b) -> a + "|" + b).orElse(""),
@@ -121,6 +126,9 @@ class RunSignalAutoConfigurationTest {
     assertThat(runs).containsEntry("failure|java.lang.IllegalStateException|jobs.flaky", 1L);
     assertThat(runs.get("jobs.flaky|success")).isGreaterThanOrEqualTo(1L);
     assertThat(spans.getFinishedSpanItems()).anySatisfy(s -> assertThat(s.getName()).isEqualTo("jobs.flaky"));
+    // Every observed run is ended, so none looks hung; a workload with maxDuration reports 0 before it first runs.
+    assertThat(activeRunAge.get("jobs.flaky")).isLessThan(1.0);
+    assertThat(activeRunAge).containsEntry("nightly-report", 0.0);
 
     // Discovered before they ever fire, with the resolved cron.
     Workload nightly = registry.workload("nightly-report");
@@ -131,6 +139,39 @@ class RunSignalAutoConfigurationTest {
 
     String manifest = Files.readString(dir.resolve("runsignal.json"));
     assertThat(manifest).contains("\"service\": \"billing\"", "\"name\": \"nightly-report\"", "\"name\": \"jobs.cleanup\"");
+  }
+
+  @Test
+  void anObservationStoppedWithoutCompletingIsCancelledAndNoLongerInProgress() throws Exception {
+    // Its own registry and reader: the application's delta reader is shared with the other test.
+    InMemoryMetricReader reader = InMemoryMetricReader.createDelta();
+    WorkloadRegistry registry = new WorkloadRegistry(OpenTelemetrySdk.builder()
+        .setMeterProvider(SdkMeterProvider.builder().registerMetricReader(reader).build()).build(), false);
+    var handler = new RunSignalObservationHandler(new ScheduledWorkloads(registry,
+        new org.springframework.mock.env.MockEnvironment(), new RunSignalProperties()));
+    var context = new org.springframework.scheduling.support.ScheduledTaskObservationContext(
+        jobs, Jobs.class.getDeclaredMethod("cleanup"));
+    handler.onStart(context);
+    handler.onStop(context); // as Spring does when it cancels a reactive @Scheduled subscription
+
+    Map<String, Long> runs = new HashMap<>();
+    double age = Double.NaN;
+    for (MetricData metric : reader.collectAllMetrics()) {
+      for (var p : metric.getName().equals("runsignal.workload.runs") ? metric.getLongSumData().getPoints() : java.util.List.<io.opentelemetry.sdk.metrics.data.LongPointData>of()) {
+        if ("jobs.cleanup".equals(p.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("runsignal.workload")))) {
+          runs.merge(p.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("runsignal.outcome")), p.getValue(), Long::sum);
+        }
+      }
+      if (metric.getName().equals("runsignal.workload.active_run_age")) {
+        for (var p : metric.getDoubleGaugeData().getPoints()) {
+          if ("jobs.cleanup".equals(p.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("runsignal.workload")))) {
+            age = p.getValue();
+          }
+        }
+      }
+    }
+    assertThat(runs).containsExactly(Map.entry("cancelled", 1L));
+    assertThat(age).isZero();
   }
 
   @Test

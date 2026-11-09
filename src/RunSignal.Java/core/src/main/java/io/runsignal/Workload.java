@@ -12,6 +12,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * A unit of background work, such as a scheduled job, a consumer or a sync loop. Get one from a
@@ -47,6 +48,12 @@ public final class Workload {
   private volatile boolean hasStarted;
   private volatile boolean hasBeaten;
 
+  // Start times (System.nanoTime()) of the runs in progress, 0 for a free slot. Allocated on the first run. A run
+  // claims a slot when it starts and frees it when it ends, so the oldest one gives active_run_age without
+  // allocating per run. Runs started while every slot is taken are not tracked.
+  static final int ACTIVE_RUN_SLOTS = 64;
+  private volatile AtomicLongArray activeRuns;
+
   Workload(WorkloadRegistry registry, String name, WorkloadOptions options) {
     this.registry = registry;
     this.name = name;
@@ -73,15 +80,21 @@ public final class Workload {
   /**
    * Starts a run. End it with exactly one call to {@link WorkloadRun#succeed()}, {@link WorkloadRun#fail(Throwable)},
    * {@link WorkloadRun#failCode(String, String)} or {@link WorkloadRun#cancel()}. Prefer {@link #run(ThrowingRunnable)},
-   * which ends the run for you and makes its span current.
+   * which ends the run for you and makes its span current. A run that is never ended stays in progress: its
+   * {@code active_run_age} keeps growing, which opens the {@code hung} alert once it passes {@code maxDuration}.
    */
   public WorkloadRun start() {
     if (!hasStarted) {
       hasStarted = true;
+      registry.instruments(); // registers the gauges, so a first run that hangs is reported
     }
     Span span = registry.tracer() == null ? null
         : registry.tracer().spanBuilder(name).setSpanKind(SpanKind.INTERNAL).setAllAttributes(nameAttributes).startSpan();
-    return new WorkloadRun(this, System.nanoTime(), span);
+    long start = System.nanoTime();
+    if (start == 0) {
+      start = 1; // 0 marks a free slot
+    }
+    return new WorkloadRun(this, start, trackStart(start), span);
   }
 
   /**
@@ -147,7 +160,36 @@ public final class Workload {
     registry.instruments().heartbeats().add(1, nameAttributes);
   }
 
-  void complete(long start, Span span, String outcome, String errorType, Throwable error, String description) {
+  // Returns the claimed slot, or -1 when every slot is taken; such a run is not tracked.
+  private int trackStart(long start) {
+    AtomicLongArray runs = activeRuns;
+    if (runs == null) {
+      synchronized (this) {
+        runs = activeRuns;
+        if (runs == null) {
+          runs = new AtomicLongArray(ACTIVE_RUN_SLOTS);
+          activeRuns = runs;
+        }
+      }
+    }
+    for (int i = 0; i < ACTIVE_RUN_SLOTS; i++) {
+      if (runs.get(i) == 0 && runs.compareAndSet(i, 0, start)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // Frees the run's slot only if it still holds this run, so ending a run twice cannot end a newer run.
+  private void trackEnd(long start, int slot) {
+    AtomicLongArray runs = activeRuns;
+    if (slot >= 0 && runs != null) {
+      runs.compareAndSet(slot, start, 0);
+    }
+  }
+
+  void complete(long start, int slot, Span span, String outcome, String errorType, Throwable error, String description) {
+    trackEnd(start, slot);
     long now = System.nanoTime();
     WorkloadRegistry.Instruments instruments = registry.instruments();
     Attributes outcomeAttributes = switch (outcome) {
@@ -187,6 +229,26 @@ public final class Workload {
   // Reported for workloads that expect heartbeats or have sent one.
   double secondsSinceHeartbeat(long now) {
     return hasBeaten || options.expectEvery().isPresent() ? (now - lastHeartbeat) / 1e9 : Double.NaN;
+  }
+
+  // Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum duration
+  // or have run, so the hung alert has a value to evaluate, and closes, while nothing is running. NaN when not
+  // reported.
+  double activeRunAge(long now) {
+    if (!hasStarted && options.maxDuration().isEmpty()) {
+      return Double.NaN;
+    }
+    AtomicLongArray runs = activeRuns;
+    long oldest = 0;
+    if (runs != null) {
+      for (int i = 0; i < ACTIVE_RUN_SLOTS; i++) {
+        long start = runs.get(i);
+        if (start != 0 && now - start > oldest) {
+          oldest = now - start;
+        }
+      }
+    }
+    return oldest / 1e9;
   }
 
   /**

@@ -12,6 +12,7 @@ export const Metrics = {
   heartbeats: 'runsignal.workload.heartbeats',
   sinceSuccess: 'runsignal.workload.since_success',
   sinceHeartbeat: 'runsignal.workload.since_heartbeat',
+  activeRunAge: 'runsignal.workload.active_run_age',
 } as const;
 
 export const Attributes = {

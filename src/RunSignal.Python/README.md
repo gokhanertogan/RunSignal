@@ -9,7 +9,7 @@ Celery beat schedule, an APScheduler job or a cron script is missed, fails, runs
 and when a consumer or worker loop stops making progress: the failures no HTTP status code describes. No hosted
 service and no ping URLs: the alerts live in the backend you already use.
 
-RunSignal records runs, items and heartbeats as OpenTelemetry metrics, with the same names as every other
+RunSignal records runs, items, heartbeats and the age of runs still in progress as OpenTelemetry metrics, with the same names as every other
 RunSignal SDK, so the `runsignal` CLI provisions the same alerts for Python services as for .NET, Go, Java,
 Node.js and Rust ones: New Relic alerts and dashboards, or Prometheus rules and a Grafana dashboard. The
 [main README](https://github.com/gokhanertogan/RunSignal#readme) covers the concepts, the alerts and the
@@ -67,7 +67,7 @@ so it works even when it is created by an import first. For explicit providers, 
 |---|---|
 | `with w.run():` / `async with w.run():` | One run. It succeeds when the block completes, is cancelled on `asyncio.CancelledError`, `KeyboardInterrupt` or `SystemExit`, and fails on any other exception, which propagates. The run's span is current inside the block. |
 | `@w.monitor` / `@monitor(name, **expectations)` | One run per call, for sync and async functions. |
-| `run = w.start()` then `run.succeed()` / `fail(exc)` / `fail_code(code, description)` / `cancel()` | A run ended by hand. Later calls are ignored. |
+| `run = w.start()` then `run.succeed()` / `fail(exc)` / `fail_code(code, description)` / `cancel()` | A run ended by hand. Later calls are ignored. A run that is never ended stays in progress: it records no outcome, and its age on `runsignal.workload.active_run_age` keeps growing until the hung alert opens. |
 | `w.processed(n)` / `w.item_failed(n)` | Items handled. |
 | `w.beat()` | A heartbeat from a long-running loop. |
 

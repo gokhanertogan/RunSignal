@@ -394,3 +394,169 @@ fn global_registry_reads_the_meter_provider_on_first_use() {
     provider.force_flush().unwrap();
     assert!(!exporter.get_finished_metrics().unwrap().is_empty());
 }
+
+fn active_run_ages(m: &HashMap<String, Vec<Point>>) -> HashMap<String, f64> {
+    m.get("runsignal.workload.active_run_age")
+        .map(|points| {
+            points
+                .iter()
+                .map(|p| (p.attributes["runsignal.workload"].clone(), p.value))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn active_run_age_grows_while_a_run_is_in_progress() {
+    let h = harness();
+    let job = h.registry.workload("long-job", Options::new()).unwrap();
+    h.registry
+        .workload(
+            "bounded",
+            Options::new().max_duration(Duration::from_secs(60)),
+        )
+        .unwrap();
+    h.registry.workload("idle", Options::new()).unwrap();
+
+    // Before any run: only the workload with a max duration is reported, at 0.
+    assert_eq!(
+        active_run_ages(&h.collect()),
+        HashMap::from([("bounded".to_string(), 0.0)])
+    );
+
+    let run = job.start();
+    std::thread::sleep(Duration::from_millis(30));
+    let ages = active_run_ages(&h.collect());
+    assert!(ages["long-job"] >= 0.03, "{ages:?}");
+    assert_eq!(ages["bounded"], 0.0);
+    assert!(!ages.contains_key("idle"));
+
+    run.succeed();
+    assert_eq!(active_run_ages(&h.collect())["long-job"], 0.0);
+}
+
+#[test]
+fn active_run_age_reports_the_oldest_run() {
+    let h = harness();
+    let job = h.registry.workload("overlapping", Options::new()).unwrap();
+    let old = job.start();
+    std::thread::sleep(Duration::from_millis(40));
+    let young = job.start();
+    let age = active_run_ages(&h.collect())["overlapping"];
+    assert!(age >= 0.04, "{age}");
+
+    old.succeed();
+    let age = active_run_ages(&h.collect())["overlapping"];
+    assert!(age < 0.04, "{age}");
+    young.cancel();
+    assert_eq!(active_run_ages(&h.collect())["overlapping"], 0.0);
+}
+
+#[test]
+fn more_runs_than_slots_are_recorded_and_free_their_slots() {
+    let h = harness();
+    let job = h.registry.workload("fan-out", Options::new()).unwrap();
+    let runs: Vec<_> = (0..100).map(|_| job.start()).collect();
+    std::thread::sleep(Duration::from_millis(10));
+    assert!(active_run_ages(&h.collect())["fan-out"] >= 0.01);
+
+    for run in runs {
+        run.succeed();
+    }
+    let m = h.collect();
+    assert_eq!(active_run_ages(&m)["fan-out"], 0.0);
+    assert_eq!(
+        outcome_counts(&m["runsignal.workload.runs"]),
+        HashMap::from([("success:".to_string(), 100.0)])
+    );
+
+    // Every slot is free again, so a new run is tracked.
+    let run = job.start();
+    std::thread::sleep(Duration::from_millis(10));
+    assert!(active_run_ages(&h.collect())["fan-out"] >= 0.01);
+    run.succeed();
+}
+
+#[test]
+fn concurrent_runs_on_many_threads_leave_no_run_in_progress() {
+    let h = harness();
+    let job = h.registry.workload("threaded", Options::new()).unwrap();
+    std::thread::scope(|s| {
+        for _ in 0..8 {
+            s.spawn(|| {
+                for _ in 0..2000 {
+                    job.start().succeed();
+                }
+            });
+        }
+    });
+    assert_eq!(active_run_ages(&h.collect())["threaded"], 0.0);
+}
+
+#[test]
+fn a_dropped_run_is_no_longer_in_progress_and_a_leaked_one_is() {
+    let h = harness();
+    let dropped = h.registry.workload("dropped", Options::new()).unwrap();
+    let leaked = h.registry.workload("leaked", Options::new()).unwrap();
+
+    drop(dropped.start());
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dropped.run(|| -> Result<(), std::io::Error> { panic!("job panicked") })
+    }));
+    std::mem::forget(leaked.start());
+    std::thread::sleep(Duration::from_millis(20));
+
+    let m = h.collect();
+    let ages = active_run_ages(&m);
+    assert_eq!(ages["dropped"], 0.0);
+    assert!(ages["leaked"] >= 0.02, "{ages:?}");
+    // A dropped run records no outcome.
+    assert!(!m.contains_key("runsignal.workload.runs"));
+}
+
+#[tokio::test]
+async fn a_dropped_run_async_future_frees_its_slot() {
+    let h = harness();
+    let job = h.registry.workload("timed-out", Options::new()).unwrap();
+    let slow = job.run_async(async {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        Ok::<_, std::io::Error>(())
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(20), slow)
+        .await
+        .is_err());
+
+    let m = h.collect();
+    assert_eq!(active_run_ages(&m)["timed-out"], 0.0);
+    assert_eq!(
+        outcome_counts(&m["runsignal.workload.runs"]),
+        HashMap::from([("cancelled:".to_string(), 1.0)])
+    );
+}
+
+#[test]
+fn registered_workloads_report_their_gauges_before_recording_anything() {
+    let h = harness();
+    h.registry
+        .workload("never-runs", Options::new().schedule("0 2 * * *"))
+        .unwrap();
+    h.registry
+        .workload(
+            "never-hangs",
+            Options::new().max_duration(Duration::from_secs(60)),
+        )
+        .unwrap();
+    h.registry
+        .workload("nothing-expected", Options::new())
+        .unwrap();
+
+    let m = h.collect();
+    let since = &m["runsignal.workload.since_success"];
+    assert_eq!(since.len(), 1);
+    assert_eq!(since[0].attributes["runsignal.workload"], "never-runs");
+    assert_eq!(
+        active_run_ages(&m),
+        HashMap::from([("never-hangs".to_string(), 0.0)])
+    );
+    assert!(!m.contains_key("runsignal.workload.runs"));
+}

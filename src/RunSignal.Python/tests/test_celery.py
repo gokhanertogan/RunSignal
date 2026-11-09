@@ -66,3 +66,38 @@ def test_task_runs_are_recorded_with_no_code_in_the_tasks(harness, app) -> None:
         ("billing.tasks.import_statement", "failure", "statement_missing"): 1,
     }
     assert m[Metrics.ITEMS][0].value == 3
+
+
+def test_finished_and_failed_tasks_leave_no_run_in_progress(harness, app) -> None:
+    h = harness()
+    instrument(registry=h.registry)
+
+    @app.task(name="billing.tasks.retry_stock", bind=True, max_retries=1)
+    def retry_stock(self) -> None:
+        self.retry(exc=StatementMissing("not yet"), countdown=0)
+
+    with pytest.raises(StatementMissing):
+        retry_stock.delay().get()
+
+    ages = {p.attributes[Attributes.WORKLOAD]: p.value for p in h.collect()[Metrics.ACTIVE_RUN_AGE]}
+    assert ages == {"billing.tasks.retry_stock": 0}
+
+
+def test_a_task_id_that_starts_twice_ends_both_runs(harness, app) -> None:
+    from runsignal.celery import _Instrumentation
+
+    h = harness()
+    handler = _Instrumentation(h.registry, {})
+
+    @app.task(name="billing.tasks.redelivered")
+    def redelivered() -> None:
+        pass
+
+    handler.prerun(task_id="t1", task=redelivered)
+    handler.prerun(task_id="t1", task=redelivered)
+    handler.postrun(task_id="t1", state="SUCCESS")
+    handler.revoked(request=type("Request", (), {"id": "t1"})())
+
+    ages = {p.attributes[Attributes.WORKLOAD]: p.value for p in h.collect()[Metrics.ACTIVE_RUN_AGE]}
+    assert ages == {"billing.tasks.redelivered": 0}
+    assert handler.runs == {}

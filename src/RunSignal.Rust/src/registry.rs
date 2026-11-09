@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use opentelemetry::context::FutureExt;
-use opentelemetry::metrics::{Counter, Histogram, Meter, ObservableGauge};
+use opentelemetry::metrics::{Counter, Histogram, Meter, MeterProvider, ObservableGauge};
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, InstrumentationScope, KeyValue};
 
@@ -20,6 +21,30 @@ struct Instruments {
     // Kept alive so their callbacks keep running.
     _since_success: ObservableGauge<f64>,
     _since_heartbeat: ObservableGauge<f64>,
+    _active_run_age: ObservableGauge<f64>,
+    // The global provider the instruments were created on; None for an explicit meter.
+    provider: Option<GlobalProvider>,
+    // Set by the gauge callbacks: only a real SDK collects, so once set the provider is the one to keep.
+    observed: Arc<AtomicBool>,
+}
+
+type GlobalProvider = Arc<dyn MeterProvider + Send + Sync>;
+
+// The instruments to record on: borrowed once they are settled, which is the hot path, or a reference count
+// while the registry still follows the global meter provider.
+enum InstrumentsRef<'a> {
+    Settled(&'a Instruments),
+    Following(Arc<Instruments>),
+}
+
+impl Deref for InstrumentsRef<'_> {
+    type Target = Instruments;
+    fn deref(&self) -> &Instruments {
+        match self {
+            InstrumentsRef::Settled(i) => i,
+            InstrumentsRef::Following(i) => i,
+        }
+    }
 }
 
 struct Inner {
@@ -27,7 +52,11 @@ struct Inner {
     base: Instant,
     meter: Option<Meter>,
     tracing: bool,
-    instruments: OnceLock<Instruments>,
+    // Instruments that are final: on the explicit meter, or on a global provider that has collected them.
+    instruments: OnceLock<Arc<Instruments>>,
+    // Instruments on the global provider seen last, until that provider collects them. Re-created when the
+    // global provider changes, so a provider installed after the registry or its workloads still gets them.
+    following: Mutex<Option<Arc<Instruments>>>,
 }
 
 /// Creates and holds the workloads of an application and the instruments they record on. Cheap to clone.
@@ -37,8 +66,9 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// A registry on the global OpenTelemetry providers, with a span per run. The global meter is read on first
-    /// use, not here: a meter taken before `global::set_meter_provider` would stay a no-op for good.
+    /// A registry on the global OpenTelemetry providers, with a span per run. It follows the global meter
+    /// provider: registering a workload or recording picks up a provider installed since. If workloads are
+    /// registered before `global::set_meter_provider`, call [`Registry::refresh_meter_provider`] once it is set.
     pub fn global() -> Self {
         Self::build(None, true)
     }
@@ -63,6 +93,7 @@ impl Registry {
                 meter,
                 tracing,
                 instruments: OnceLock::new(),
+                following: Mutex::new(None),
             }),
         }
     }
@@ -87,7 +118,19 @@ impl Registry {
         Ok(self.get_or_add_inner(name, &options)?.0)
     }
 
+    // Registering creates the instruments, so a workload that never records still reports its gauges: a
+    // scheduled job that never runs must still be reported as missed.
     fn get_or_add_inner(&self, name: &str, options: &Options) -> Result<(Workload, bool), Error> {
+        let result = self.get_or_add_unobserved(name, options)?;
+        self.instruments();
+        Ok(result)
+    }
+
+    fn get_or_add_unobserved(
+        &self,
+        name: &str,
+        options: &Options,
+    ) -> Result<(Workload, bool), Error> {
         if let Some(existing) = self.inner.workloads.read().expect("poisoned").get(name) {
             return Ok((
                 Workload {
@@ -138,13 +181,66 @@ impl Registry {
         self.inner.base.elapsed().as_nanos() as u64
     }
 
-    fn instruments(&self) -> &Instruments {
-        self.inner.instruments.get_or_init(|| {
-            let meter = self.inner.meter.clone().unwrap_or_else(|| {
-                global::meter_with_scope(InstrumentationScope::builder(SCOPE_NAME).with_version(VERSION).build())
-            });
-            let weak = Arc::downgrade(&self.inner);
-            Instruments {
+    // The hot path is one atomic load once the instruments are settled. Until then (a registry on the global
+    // provider whose instruments have not been collected yet) it compares the global provider with the one the
+    // instruments were created on, and re-creates them when it has changed.
+    fn instruments(&self) -> InstrumentsRef<'_> {
+        if let Some(settled) = self.inner.instruments.get() {
+            return InstrumentsRef::Settled(settled);
+        }
+        self.instruments_slow()
+    }
+
+    #[cold]
+    fn instruments_slow(&self) -> InstrumentsRef<'_> {
+        let mut following = self.inner.following.lock().expect("poisoned");
+        if let Some(settled) = self.inner.instruments.get() {
+            return InstrumentsRef::Settled(settled);
+        }
+        let Some(provider) = self.inner.meter.is_none().then(global::meter_provider) else {
+            let meter = self.inner.meter.clone().expect("explicit meter");
+            let created = Arc::new(self.create_instruments(meter, None));
+            return InstrumentsRef::Settled(self.inner.instruments.get_or_init(|| created));
+        };
+        let current = match following.as_ref() {
+            Some(i)
+                if i.provider
+                    .as_ref()
+                    .is_some_and(|p| same_provider(p, &provider)) =>
+            {
+                i.clone()
+            }
+            _ => {
+                let meter = provider.meter_with_scope(
+                    InstrumentationScope::builder(SCOPE_NAME)
+                        .with_version(VERSION)
+                        .build(),
+                );
+                let created = Arc::new(self.create_instruments(meter, Some(provider)));
+                *following = Some(created.clone());
+                created
+            }
+        };
+        if current.observed.load(Ordering::Relaxed) {
+            *following = None;
+            return InstrumentsRef::Settled(self.inner.instruments.get_or_init(|| current));
+        }
+        InstrumentsRef::Following(current)
+    }
+
+    /// Makes the gauges (`since_success`, `since_heartbeat`, `active_run_age`) observable on the current global
+    /// meter provider. Registering a workload and recording do this already, so call it only when workloads were
+    /// registered before `global::set_meter_provider` and may record nothing for a while, such as a nightly job:
+    /// otherwise their gauges, and so the `missed` alert, wait for the first recording. A registry stops following
+    /// the global provider once that provider has collected its gauges, so set the provider once.
+    pub fn refresh_meter_provider(&self) {
+        self.instruments();
+    }
+
+    fn create_instruments(&self, meter: Meter, provider: Option<GlobalProvider>) -> Instruments {
+        let weak = Arc::downgrade(&self.inner);
+        let observed = Arc::new(AtomicBool::new(false));
+        Instruments {
                 runs: meter.u64_counter(crate::METRIC_RUNS).with_unit("{run}").with_description("Completed runs of a workload.").build(),
                 duration: meter
                     .f64_histogram(crate::METRIC_DURATION)
@@ -162,16 +258,23 @@ impl Registry {
                     .f64_observable_gauge(crate::METRIC_SINCE_SUCCESS)
                     .with_unit("s")
                     .with_description("Seconds since the last successful run of a workload, or since it was registered.")
-                    .with_callback(observe(weak.clone(), WorkloadInner::seconds_since_success))
+                    .with_callback(observe(weak.clone(), observed.clone(), WorkloadInner::seconds_since_success))
                     .build(),
                 _since_heartbeat: meter
                     .f64_observable_gauge(crate::METRIC_SINCE_HEARTBEAT)
                     .with_unit("s")
                     .with_description("Seconds since the last heartbeat of a workload, or since it was registered.")
-                    .with_callback(observe(weak, WorkloadInner::seconds_since_heartbeat))
+                    .with_callback(observe(weak.clone(), observed.clone(), WorkloadInner::seconds_since_heartbeat))
                     .build(),
+                _active_run_age: meter
+                    .f64_observable_gauge(crate::METRIC_ACTIVE_RUN_AGE)
+                    .with_unit("s")
+                    .with_description("Seconds the oldest unfinished run of a workload has been running, or 0.")
+                    .with_callback(observe(weak, observed.clone(), WorkloadInner::active_run_age))
+                    .build(),
+                provider,
+                observed,
             }
-        })
     }
 
     /// The workload manifest as JSON, in the format of spec/manifest.schema.json. `service` must match the
@@ -220,11 +323,19 @@ impl Registry {
     }
 }
 
+fn same_provider(a: &GlobalProvider, b: &GlobalProvider) -> bool {
+    std::ptr::eq(Arc::as_ptr(a) as *const (), Arc::as_ptr(b) as *const ())
+}
+
 fn observe(
     registry: Weak<Inner>,
+    observed: Arc<AtomicBool>,
     seconds: fn(&WorkloadInner, u64) -> Option<f64>,
 ) -> impl Fn(&dyn opentelemetry::metrics::AsyncInstrument<f64>) + Send + Sync + 'static {
     move |observer| {
+        if !observed.load(Ordering::Relaxed) {
+            observed.store(true, Ordering::Relaxed);
+        }
         let Some(inner) = registry.upgrade() else {
             return;
         };
@@ -252,7 +363,16 @@ struct WorkloadInner {
     last_heartbeat: AtomicU64,
     has_started: AtomicBool,
     has_beaten: AtomicBool,
+    // Start times of the runs in progress, 0 for a free slot. A run claims a slot when it starts and frees it when
+    // it ends, so the oldest one gives active_run_age without allocating per run. Stored inline in the workload.
+    active_runs: [AtomicU64; ACTIVE_RUN_SLOTS],
 }
+
+// Runs in progress tracked per workload. Runs started while every slot is taken are not tracked, so with more
+// concurrent runs the reported age is a lower bound.
+const ACTIVE_RUN_SLOTS: usize = 64;
+// The slot of a run that is not tracked, or no longer is.
+const NO_SLOT: usize = usize::MAX;
 
 impl WorkloadInner {
     fn new(name: &str, options: Options, now: u64) -> Self {
@@ -272,7 +392,44 @@ impl WorkloadInner {
             last_heartbeat: AtomicU64::new(now),
             has_started: AtomicBool::new(false),
             has_beaten: AtomicBool::new(false),
+            active_runs: std::array::from_fn(|_| AtomicU64::new(0)),
         }
+    }
+
+    // Claims a free slot for a run that started at `start` (never 0). Returns NO_SLOT when every slot is taken.
+    fn track_start(&self, start: u64) -> usize {
+        for (i, slot) in self.active_runs.iter().enumerate() {
+            if slot.load(Ordering::Relaxed) == 0
+                && slot
+                    .compare_exchange(0, start, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                return i;
+            }
+        }
+        NO_SLOT
+    }
+
+    // Frees the run's slot only if it still holds this run, so it can never free a slot a newer run claimed.
+    fn track_end(&self, start: u64, slot: usize) {
+        if let Some(s) = self.active_runs.get(slot) {
+            let _ = s.compare_exchange(start, 0, Ordering::Relaxed, Ordering::Relaxed);
+        }
+    }
+
+    // Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum
+    // duration or have run, so the hung alert has a value to evaluate, and closes, while nothing is running.
+    fn active_run_age(&self, now: u64) -> Option<f64> {
+        (self.has_started.load(Ordering::Relaxed) || self.options.max_duration.is_some()).then(
+            || {
+                self.active_runs
+                    .iter()
+                    .map(|s| s.load(Ordering::Relaxed))
+                    .filter(|&start| start != 0)
+                    .min()
+                    .map_or(0.0, |oldest| now.saturating_sub(oldest) as f64 / 1e9)
+            },
+        )
     }
 
     // Reported for workloads that are scheduled or have run, so alerts can tell a missed run from a workload
@@ -309,8 +466,11 @@ impl Workload {
     }
 
     /// Starts a run. End it with [`Run::succeed`], [`Run::fail`], [`Run::fail_code`] or [`Run::cancel`]; each takes
-    /// the run by value, so a run cannot be ended twice. A run that is dropped without being ended records nothing,
-    /// which the backend sees as a missed run. Prefer [`Workload::run`] or [`Workload::run_async`].
+    /// the run by value, so a run cannot be ended twice. The run counts as in progress, in the `active_run_age`
+    /// gauge, until it is ended or dropped. A run that is dropped without being ended (including by a panic)
+    /// records no outcome, which the backend sees as a missed run, and no longer counts as in progress. A run
+    /// that is leaked (for example with [`std::mem::forget`]) stays in progress for good, which eventually opens
+    /// the `hung` alert. Prefer [`Workload::run`] or [`Workload::run_async`].
     pub fn start(&self) -> Run {
         if !self.inner.has_started.load(Ordering::Relaxed) {
             self.inner.has_started.store(true, Ordering::Relaxed);
@@ -328,9 +488,14 @@ impl Workload {
                 .start(&tracer);
             Context::current_with_span(span)
         });
+        // Follows a global meter provider installed since registration, so a first run that hangs is reported.
+        self.registry.instruments();
+        // 0 marks a free tracking slot, so no run starts at 0.
+        let start = self.registry.now().max(1);
         Run {
+            slot: self.inner.track_start(start),
             workload: self.clone(),
-            start: self.registry.now(),
+            start,
             context,
         }
     }
@@ -402,11 +567,13 @@ impl Workload {
     fn complete(
         &self,
         start: u64,
+        slot: usize,
         context: Option<Context>,
         outcome: &'static str,
         error_type: Option<String>,
         description: Option<String>,
     ) {
+        self.inner.track_end(start, slot);
         let instruments = self.registry.instruments();
         let now = self.registry.now();
         let attributes = match outcome {
@@ -450,11 +617,14 @@ impl Workload {
 }
 
 /// One run of a [`Workload`], started with [`Workload::start`]. Each way of ending it takes it by value, so it
-/// is recorded exactly once.
+/// is recorded exactly once. Dropping it without ending it records no outcome but stops it counting as in
+/// progress.
 #[must_use = "end the run with succeed, fail, fail_code or cancel"]
 pub struct Run {
     workload: Workload,
     start: u64,
+    // The tracking slot, NO_SLOT once the run has ended or when it is not tracked.
+    slot: usize,
     context: Option<Context>,
 }
 
@@ -471,18 +641,15 @@ impl Run {
     }
 
     /// Ends the run as successful.
-    pub fn succeed(self) {
-        self.workload
-            .complete(self.start, self.context, "success", None, None);
+    pub fn succeed(mut self) {
+        self.end("success", None, None);
     }
 
     /// Ends the run as failed because of `error`. Its `error.type` is the compiler's name for the error type,
     /// from [`std::any::type_name`], such as `core::io::error::Error`. That name can change between Rust
     /// versions, so use [`Run::fail_code`] when dashboards or alerts filter on specific errors.
-    pub fn fail<E>(self, error: &E) {
-        self.workload.complete(
-            self.start,
-            self.context,
+    pub fn fail<E>(mut self, error: &E) {
+        self.end(
             "failure",
             Some(std::any::type_name::<E>().to_string()),
             None,
@@ -492,11 +659,9 @@ impl Run {
 
     /// Ends the run as failed without an error value, for example when an expected input file is missing.
     /// `code` must be a short, stable value such as `statement_missing`; never put messages or IDs in it.
-    pub fn fail_code(self, code: &str, description: &str) {
+    pub fn fail_code(mut self, code: &str, description: &str) {
         let code = if code.is_empty() { "unknown" } else { code };
-        self.workload.complete(
-            self.start,
-            self.context,
+        self.end(
             "failure",
             Some(code.to_string()),
             Some(description.to_string()),
@@ -504,9 +669,34 @@ impl Run {
     }
 
     /// Ends the run as cancelled, for example on shutdown. Cancelled runs do not count as failures.
-    pub fn cancel(self) {
-        self.workload
-            .complete(self.start, self.context, "cancelled", None, None);
+    pub fn cancel(mut self) {
+        self.end("cancelled", None, None);
+    }
+
+    fn end(
+        &mut self,
+        outcome: &'static str,
+        error_type: Option<String>,
+        description: Option<String>,
+    ) {
+        let slot = std::mem::replace(&mut self.slot, NO_SLOT);
+        self.workload.complete(
+            self.start,
+            slot,
+            self.context.take(),
+            outcome,
+            error_type,
+            description,
+        );
+    }
+}
+
+// A run dropped without being ended records no outcome, but must not stay in progress. After an ending method
+// the slot is already NO_SLOT, so this frees it at most once.
+impl Drop for Run {
+    fn drop(&mut self) {
+        let slot = std::mem::replace(&mut self.slot, NO_SLOT);
+        self.workload.inner.track_end(self.start, slot);
     }
 }
 
@@ -518,5 +708,35 @@ impl Drop for CancelOnDrop {
         if let Some(run) = self.0.take() {
             run.cancel();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ending_with_a_stale_start_does_not_free_a_newer_run() {
+        let w = WorkloadInner::new("w", Options::new(), 0);
+        let slot = w.track_start(100);
+        w.track_end(100, slot);
+        // The slot is reused by a newer run; a late second end of the first run must leave it alone.
+        assert_eq!(w.track_start(200), slot);
+        w.track_end(100, slot);
+        assert_eq!(w.active_runs[slot].load(Ordering::Relaxed), 200);
+        w.track_end(200, slot);
+        assert_eq!(w.active_runs[slot].load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn runs_beyond_the_slots_are_untracked() {
+        let w = WorkloadInner::new("w", Options::new(), 0);
+        for i in 0..ACTIVE_RUN_SLOTS as u64 {
+            assert_ne!(w.track_start(i + 1), NO_SLOT);
+        }
+        assert_eq!(w.track_start(1000), NO_SLOT);
+        w.track_end(1000, NO_SLOT); // a no-op
+        w.has_started.store(true, Ordering::Relaxed);
+        assert_eq!(w.active_run_age(1001), Some(1000.0 / 1e9));
     }
 }

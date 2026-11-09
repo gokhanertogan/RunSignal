@@ -83,6 +83,8 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 		metric.WithDescription("Seconds since the last successful run of a workload, or since it was registered."))
 	sinceHeartbeat, _ := meter.Float64ObservableGauge(MetricSinceHeartbeat, metric.WithUnit("s"),
 		metric.WithDescription("Seconds since the last heartbeat of a workload, or since it was registered."))
+	activeRunAge, _ := meter.Float64ObservableGauge(MetricActiveRunAge, metric.WithUnit("s"),
+		metric.WithDescription("Seconds the oldest unfinished run of a workload has been running, or 0 when none is."))
 
 	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		now := r.now()
@@ -93,9 +95,12 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 			if seconds, ok := w.secondsSinceHeartbeat(now); ok {
 				o.ObserveFloat64(sinceHeartbeat, seconds, w.nameObserve...)
 			}
+			if seconds, ok := w.activeRunAge(now); ok {
+				o.ObserveFloat64(activeRunAge, seconds, w.nameObserve...)
+			}
 		}
 		return nil
-	}, sinceSuccess, sinceHeartbeat)
+	}, sinceSuccess, sinceHeartbeat, activeRunAge)
 	return r
 }
 

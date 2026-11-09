@@ -181,3 +181,111 @@ def test_writes_the_same_manifest_as_the_other_sdks(tmp_path: Path, monkeypatch:
 def test_no_manifest_without_the_environment_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RUNSIGNAL_MANIFEST_PATH", raising=False)
     assert WorkloadRegistry().write_manifest_from_env("billing") is None
+
+
+def _ages(h) -> dict[str, float]:
+    return {p.attributes[Attributes.WORKLOAD]: p.value for p in h.collect().get(Metrics.ACTIVE_RUN_AGE, [])}
+
+
+def test_active_run_age_grows_while_a_run_is_in_progress_and_returns_to_zero(harness) -> None:
+    h = harness()
+    w = h.registry.workload("nightly-invoice")
+    run = w.start()
+    run._started -= 5  # as if it started 5 seconds ago
+
+    assert _ages(h)["nightly-invoice"] >= 5
+
+    run.succeed()
+    assert _ages(h) == {"nightly-invoice": 0}
+
+    with w.run():
+        assert _ages(h)["nightly-invoice"] > 0
+    assert _ages(h) == {"nightly-invoice": 0}
+
+
+def test_active_run_age_is_reported_for_workloads_with_a_max_duration_or_runs(harness) -> None:
+    h = harness()
+    h.registry.workload("idle")
+    h.registry.workload("nightly-invoice", max_duration="30m")
+    h.registry.workload("stock-sync", schedule="*/5 * * * *", expect_every="5m")
+
+    assert _ages(h) == {"nightly-invoice": 0}
+
+
+def test_active_run_age_reports_the_oldest_run_and_a_double_end_does_not_end_another_run(harness) -> None:
+    h = harness()
+    w = h.registry.workload("import-statements")
+    first = w.start()
+    first.succeed()
+    second = w.start()  # reuses the slot the first run freed
+    second._started -= 60
+    third = w.start()
+    third._started -= 10
+
+    first.succeed()
+    first.cancel()
+    assert _ages(h)["import-statements"] >= 60
+
+    second.fail_code("statement_missing")
+    age = _ages(h)["import-statements"]
+    assert 10 <= age < 60
+
+    third.cancel()
+    assert _ages(h) == {"import-statements": 0}
+
+
+def test_active_run_age_tracks_concurrent_runs_from_many_threads(harness) -> None:
+    import threading
+
+    h = harness()
+    w = h.registry.workload("sync")
+    runs = []
+    lock = threading.Lock()
+
+    def start() -> None:
+        for _ in range(8):
+            r = w.start()
+            with lock:
+                runs.append(r)
+
+    threads = [threading.Thread(target=start) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len({r._slot for r in runs}) == 64
+
+    extra = w.start()  # beyond 64 concurrent runs: not tracked, ending it is harmless
+    assert extra._slot == -1
+    extra.succeed()
+    for r in runs[:-1]:
+        r.succeed()
+    assert _ages(h)["sync"] > 0
+    runs[-1].succeed()
+    assert _ages(h) == {"sync": 0}
+
+
+def test_registries_sharing_a_meter_provider_all_report_their_gauges() -> None:
+    # OpenTelemetry keeps only the first gauge registered under a name, so each registry's own gauges would drop
+    # the other's workloads, and with them their missed and hung alerts.
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from runsignal import WorkloadRegistry
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    first = WorkloadRegistry(meter_provider=provider, tracing=False)
+    second = WorkloadRegistry(meter_provider=provider, tracing=False)
+    first.workload("shared-first", schedule="0 2 * * *", max_duration=60)
+    second.workload("shared-second", schedule="0 2 * * *", max_duration=60)
+
+    data = reader.get_metrics_data()
+    reported = {
+        m.name: {dp.attributes["runsignal.workload"] for dp in m.data.data_points}
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for m in sm.metrics
+    }
+    assert reported["runsignal.workload.since_success"] == {"shared-first", "shared-second"}
+    assert reported["runsignal.workload.active_run_age"] == {"shared-first", "shared-second"}

@@ -167,6 +167,113 @@ class WorkloadTest {
         .satisfies(p -> assertThat(p.value()).isLessThan(0.04));
   }
 
+  private double activeRunAge(String workload) {
+    List<Point> points = collect().getOrDefault(RunSignalTelemetry.METRIC_ACTIVE_RUN_AGE, List.of());
+    return points.stream().filter(p -> workload.equals(p.attributes().get("runsignal.workload")))
+        .mapToDouble(Point::value).findFirst().orElse(Double.NaN);
+  }
+
+  @Test
+  void activeRunAgeGrowsWhileARunIsInProgressAndReturnsToZero() throws Exception {
+    Workload w = registry.workload("hung-candidate");
+    assertThat(activeRunAge("hung-candidate")).isNaN(); // no maxDuration and no runs: not reported
+
+    WorkloadRun run = w.start();
+    Thread.sleep(30);
+    assertThat(activeRunAge("hung-candidate")).isGreaterThanOrEqualTo(0.02);
+
+    run.succeed();
+    assertThat(activeRunAge("hung-candidate")).isZero();
+  }
+
+  @Test
+  void activeRunAgeIsReportedForWorkloadsWithMaxDurationOrRuns() {
+    registry.workload("bounded", WorkloadOptions.builder().maxDuration("10m").build());
+    registry.workload("idle");
+    registry.workload("ran").start().cancel();
+
+    List<Point> points = collect().get(RunSignalTelemetry.METRIC_ACTIVE_RUN_AGE);
+    assertThat(points).extracting(p -> p.attributes().get("runsignal.workload")).containsExactlyInAnyOrder("bounded", "ran");
+    assertThat(points).allSatisfy(p -> assertThat(p.value()).isZero());
+  }
+
+  @Test
+  void activeRunAgeTracksTheOldestRunAndEndingTwiceDoesNotEndAnother() throws Exception {
+    Workload w = registry.workload("concurrent");
+    WorkloadRun first = w.start();
+    first.succeed();
+    WorkloadRun second = w.start(); // likely reuses the slot the first run freed
+    Thread.sleep(30);
+    first.succeed();
+    first.fail(new IllegalStateException("again"));
+    first.cancel();
+    assertThat(activeRunAge("concurrent")).isGreaterThanOrEqualTo(0.02);
+
+    WorkloadRun third = w.start();
+    assertThat(activeRunAge("concurrent")).isGreaterThanOrEqualTo(0.02); // still the oldest (second) run
+    second.succeed();
+    assertThat(activeRunAge("concurrent")).isLessThan(0.02);
+    third.cancel();
+    assertThat(activeRunAge("concurrent")).isZero();
+  }
+
+  @Test
+  void activeRunAgeSurvivesMoreConcurrentRunsThanItTracks() throws Exception {
+    Workload w = registry.workload("crowded");
+    List<WorkloadRun> runs = new ArrayList<>();
+    for (int i = 0; i < Workload.ACTIVE_RUN_SLOTS * 2 + 10; i++) {
+      runs.add(w.start());
+    }
+    Thread.sleep(20);
+    assertThat(activeRunAge("crowded")).isGreaterThanOrEqualTo(0.01);
+
+    runs.forEach(WorkloadRun::succeed);
+    assertThat(activeRunAge("crowded")).isZero();
+
+    WorkloadRun later = w.start();
+    Thread.sleep(20);
+    assertThat(activeRunAge("crowded")).isGreaterThanOrEqualTo(0.01);
+    later.succeed();
+    assertThat(activeRunAge("crowded")).isZero();
+  }
+
+  @Test
+  void workloadsThatNeverRunStillReportTheirGauges() {
+    // Nothing is recorded at all: registering the workloads is enough for the missed and hung alerts.
+    registry.workload("never-fires", WorkloadOptions.builder().schedule("0 2 * * *").maxDuration("10m").build());
+
+    Map<String, List<Point>> m = collect();
+    assertThat(m.get(RunSignalTelemetry.METRIC_SINCE_SUCCESS)).singleElement()
+        .satisfies(p -> assertThat(p.attributes()).containsEntry("runsignal.workload", "never-fires"));
+    assertThat(m.get(RunSignalTelemetry.METRIC_ACTIVE_RUN_AGE)).singleElement()
+        .satisfies(p -> assertThat(p.value()).isZero());
+  }
+
+  @Test
+  void theGlobalRegistryDoesNotReadGlobalOpenTelemetryBeforeItIsSet() {
+    io.opentelemetry.api.GlobalOpenTelemetry.resetForTest();
+    try {
+      WorkloadRegistry global = WorkloadRegistry.global();
+      global.workload("global-early", WorkloadOptions.builder().schedule("0 2 * * *").build());
+      assertThat(io.opentelemetry.api.GlobalOpenTelemetry.isSet()).isFalse();
+
+      InMemoryMetricReader globalReader = InMemoryMetricReader.create();
+      io.opentelemetry.api.GlobalOpenTelemetry.set(OpenTelemetrySdk.builder()
+          .setMeterProvider(SdkMeterProvider.builder().registerMetricReader(globalReader).build()).build());
+      global.getOrAdd("global-late", WorkloadOptions.NONE); // the next registration creates the gauges
+
+      List<String> reported = new ArrayList<>();
+      for (MetricData metric : globalReader.collectAllMetrics()) {
+        if (metric.getName().equals(RunSignalTelemetry.METRIC_SINCE_SUCCESS)) {
+          metric.getDoubleGaugeData().getPoints().forEach(p -> reported.add(p.getAttributes().get(Workload.WORKLOAD)));
+        }
+      }
+      assertThat(reported).containsExactly("global-early");
+    } finally {
+      io.opentelemetry.api.GlobalOpenTelemetry.resetForTest();
+    }
+  }
+
   @Test
   void registryValidatesNamesAndKeepsOptionsInOnePlace() {
     for (String bad : List.of("", "Nightly", "has space", "-dash", "order/{id}")) {

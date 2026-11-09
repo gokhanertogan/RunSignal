@@ -31,7 +31,7 @@ export type Duration = number | string;
 export interface WorkloadOptions {
   /** Cron expression for when the workload should run. Produces the missed alert. */
   schedule?: string;
-  /** Longest acceptable run. Produces the overrun alert. */
+  /** Longest acceptable run. Produces the overrun alert (a finished run took longer) and the hung alert (an unfinished run has been running longer). */
   maxDuration?: Duration;
   /** Longest acceptable gap between heartbeats. Produces the stalled alert. */
   expectEvery?: Duration;
@@ -148,6 +148,10 @@ export class WorkloadRegistry {
       unit: 's',
       description: 'Seconds since the last heartbeat of a workload, or since it was registered.',
     });
+    const activeRunAge = meter.createObservableGauge(Metrics.activeRunAge, {
+      unit: 's',
+      description: 'Seconds the oldest unfinished run of a workload has been running, or 0 while none is.',
+    });
     meter.addBatchObservableCallback((observer) => {
       const now = performance.now();
       for (const workload of this.#workloads.values()) {
@@ -155,8 +159,10 @@ export class WorkloadRegistry {
         if (success !== undefined) observer.observe(sinceSuccess, success, workload.nameAttributes);
         const heartbeat = workload.secondsSinceHeartbeat(now);
         if (heartbeat !== undefined) observer.observe(sinceHeartbeat, heartbeat, workload.nameAttributes);
+        const active = workload.activeRunAge(now);
+        if (active !== undefined) observer.observe(activeRunAge, active, workload.nameAttributes);
       }
-    }, [sinceSuccess, sinceHeartbeat]);
+    }, [sinceSuccess, sinceHeartbeat, activeRunAge]);
 
     return {
       provider,
@@ -198,6 +204,10 @@ export class WorkloadRegistry {
     validateName(name);
     const created = new Workload(this, name, toExpectations(options));
     this.#workloads.set(name, created);
+    // Moves the gauges to the global meter provider if it has changed since the registry was created, for example
+    // when the default registry was created by an import before the SDK started. Otherwise a workload that never
+    // runs would report nothing, and its missed and hung alerts would never open.
+    void this.instruments;
     return created;
   }
 
@@ -260,6 +270,10 @@ export interface WorkloadManifest {
 
 type Outcome = 'success' | 'failure' | 'cancelled';
 
+// How many runs in progress a workload tracks for active_run_age. Runs started while every slot is taken are not
+// tracked, so with more concurrent runs the reported age is a lower bound.
+const ACTIVE_RUN_SLOTS = 64;
+
 /**
  * A unit of background work, such as a scheduled job, a queue consumer or a sync loop. Get one from a
  * WorkloadRegistry once and keep it.
@@ -277,6 +291,9 @@ export class Workload {
   #lastHeartbeat: number;
   #hasStarted = false;
   #hasBeaten = false;
+  // Start timestamps of the runs in progress, 0 for a free slot, allocated on the first run. A run claims a slot
+  // when it starts and frees it when it ends, so the oldest one gives active_run_age.
+  #activeRuns: Float64Array | undefined;
 
   /** @internal */
   constructor(registry: WorkloadRegistry, readonly name: string, readonly expectations: Expectations) {
@@ -294,12 +311,34 @@ export class Workload {
 
   /**
    * Starts a run. End it with exactly one call to `succeed`, `fail`, `failCode` or `cancel`; later calls are
-   * ignored. Prefer `run`, which ends the run for you and makes the run's span active for `fn`.
+   * ignored. A run that is never ended stays in progress: it reports a growing `active_run_age`, which opens the
+   * hung alert once it passes `maxDuration`. Prefer `run`, which ends the run for you and makes the run's span
+   * active for `fn`.
    */
   start(): Run {
     this.#hasStarted = true;
     const span = this.#registry.tracer?.startSpan(this.name, { kind: SpanKind.INTERNAL, attributes: this.nameAttributes });
-    return new Run(this, performance.now(), span);
+    const started = performance.now();
+    return new Run(this, started, this.#trackStart(started), span);
+  }
+
+  // Returns the claimed slot, or -1 when every slot is taken; such a run is not tracked.
+  #trackStart(started: number): number {
+    const runs = (this.#activeRuns ??= new Float64Array(ACTIVE_RUN_SLOTS));
+    for (let i = 0; i < runs.length; i++) {
+      if (runs[i] === 0) {
+        // performance.now() is positive after startup; guard 0 so a run can never look like a free slot.
+        runs[i] = started || Number.MIN_VALUE;
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // Frees the run's slot only if it still holds this run, so ending a run twice cannot end a newer one.
+  #trackEnd(started: number, slot: number): void {
+    const runs = this.#activeRuns;
+    if (slot >= 0 && runs !== undefined && runs[slot] === (started || Number.MIN_VALUE)) runs[slot] = 0;
   }
 
   /**
@@ -338,7 +377,8 @@ export class Workload {
   }
 
   /** @internal */
-  complete(start: number, span: Span | undefined, outcome: Outcome, errorType?: string, error?: unknown, description?: string): void {
+  complete(start: number, slot: number, span: Span | undefined, outcome: Outcome, errorType?: string, error?: unknown, description?: string): void {
+    this.#trackEnd(start, slot);
     const now = performance.now();
     const instruments = this.#registry.instruments;
     if (errorType === undefined) {
@@ -376,6 +416,21 @@ export class Workload {
   secondsSinceHeartbeat(now: number): number | undefined {
     return this.#hasBeaten || this.expectations.expectEveryMs !== undefined ? (now - this.#lastHeartbeat) / 1000 : undefined;
   }
+
+  // Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum
+  // duration or have run, so the hung alert has a value to evaluate, and closes, while nothing is running.
+  /** @internal */
+  activeRunAge(now: number): number | undefined {
+    if (!this.#hasStarted && this.expectations.maxDurationMs === undefined) return undefined;
+    const runs = this.#activeRuns;
+    if (runs === undefined) return 0;
+    let oldest = Infinity;
+    for (let i = 0; i < runs.length; i++) {
+      const started = runs[i]!;
+      if (started !== 0 && started < oldest) oldest = started;
+    }
+    return oldest === Infinity ? 0 : Math.max(0, (now - oldest) / 1000);
+  }
 }
 
 /** One run of a Workload, started with `Workload.start`. */
@@ -383,7 +438,7 @@ export class Run {
   #ended = false;
 
   /** @internal */
-  constructor(readonly workload: Workload, private readonly started: number, readonly span: Span | undefined) {}
+  constructor(readonly workload: Workload, private readonly started: number, private readonly slot: number, readonly span: Span | undefined) {}
 
   /** Milliseconds since the run started. */
   get elapsedMs(): number {
@@ -392,7 +447,7 @@ export class Run {
 
   /** Ends the run as successful. */
   succeed(): void {
-    if (this.#end()) this.workload.complete(this.started, this.span, 'success');
+    if (this.#end()) this.workload.complete(this.started, this.slot, this.span, 'success');
   }
 
   /**
@@ -400,7 +455,7 @@ export class Run {
    * its `code` if that is a string (such as Node's `'ECONNREFUSED'`), then its class name.
    */
   fail(error: unknown): void {
-    if (this.#end()) this.workload.complete(this.started, this.span, 'failure', errorTypeOf(error), error, error instanceof Error ? error.message : String(error));
+    if (this.#end()) this.workload.complete(this.started, this.slot, this.span, 'failure', errorTypeOf(error), error, error instanceof Error ? error.message : String(error));
   }
 
   /**
@@ -408,12 +463,12 @@ export class Run {
    * a short, stable value such as `'statement_missing'`; never put messages or IDs in it.
    */
   failCode(code: string, description?: string): void {
-    if (this.#end()) this.workload.complete(this.started, this.span, 'failure', code || 'unknown', undefined, description);
+    if (this.#end()) this.workload.complete(this.started, this.slot, this.span, 'failure', code || 'unknown', undefined, description);
   }
 
   /** Ends the run as cancelled, for example on shutdown. Cancelled runs do not count as failures. */
   cancel(): void {
-    if (this.#end()) this.workload.complete(this.started, this.span, 'cancelled');
+    if (this.#end()) this.workload.complete(this.started, this.slot, this.span, 'cancelled');
   }
 
   #end(): boolean {

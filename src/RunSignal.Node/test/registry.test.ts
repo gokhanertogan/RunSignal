@@ -97,7 +97,9 @@ describe('global providers', () => {
     metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] }));
     try {
       await workload.run(() => undefined);
-      assert.equal((await collect())[Metrics.runs]?.length, 1);
+      const m = await collect();
+      assert.equal(m[Metrics.runs]?.length, 1);
+      assert.deepEqual(m[Metrics.activeRunAge]?.map((p) => p.value), [0]);
     } finally {
       metrics.disable();
     }
@@ -129,6 +131,60 @@ describe('items, heartbeats and age gauges', () => {
     const beat = m[Metrics.sinceHeartbeat] ?? [];
     assert.equal(beat.length, 1);
     assert.ok(beat[0]!.value < 0.04);
+  });
+});
+
+describe('active run age', () => {
+  const age = async (collect: () => Promise<Record<string, Array<{ value: number; attributes: Record<string, unknown> }>>>) =>
+    Object.fromEntries(((await collect())[Metrics.activeRunAge] ?? []).map((p) => [p.attributes[Attributes.workload], p.value]));
+
+  it('grows while a run is in progress and is 0 once it ends', async () => {
+    const { registry, collect } = harness({ tracing: false });
+    const workload = registry.workload('hangs', { maxDuration: '30m' });
+    assert.deepEqual(await age(collect), { hangs: 0 }); // maxDuration: reported before the first run
+
+    const run = workload.start();
+    await sleep(50);
+    const during = await age(collect);
+    assert.ok(during['hangs']! >= 0.04, `age ${during['hangs']}`);
+
+    run.succeed();
+    assert.deepEqual(await age(collect), { hangs: 0 });
+  });
+
+  it('reports the oldest of several runs in progress, and a run never ended stays in progress', async () => {
+    const { registry, collect } = harness({ tracing: false });
+    const workload = registry.workload('consumer');
+    workload.start(); // never ended
+    await sleep(50);
+    const runs = Array.from({ length: 70 }, () => workload.start()); // more than the tracked slots
+    for (const r of runs) r.cancel();
+    const { consumer } = await age(collect);
+    assert.ok(consumer! >= 0.04, `age ${consumer}`);
+  });
+
+  it('is not reported for a workload with no maxDuration that has not run', async () => {
+    const { registry, collect } = harness({ tracing: false });
+    registry.workload('idle', { schedule: '0 2 * * *' });
+    assert.deepEqual(await age(collect), {});
+    await registry.workload('ran').run(() => undefined);
+    assert.deepEqual(await age(collect), { ran: 0 });
+  });
+
+  it('ending a run twice does not end another run in progress', async () => {
+    const { registry, collect } = harness({ tracing: false });
+    const workload = registry.workload('twice');
+    const first = workload.start();
+    first.succeed();
+    const second = workload.start(); // reuses the slot the first run freed
+    await sleep(50);
+    first.succeed();
+    first.fail(new Error('late'));
+    first.cancel();
+    const { twice } = await age(collect);
+    assert.ok(twice! >= 0.04, `age ${twice}`);
+    second.succeed();
+    assert.deepEqual(await age(collect), { twice: 0 });
   });
 });
 

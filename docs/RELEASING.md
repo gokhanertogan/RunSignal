@@ -32,3 +32,6 @@ crates.io and Maven Central reject a version that already exists.
 A job uses its token secret when the secret exists, and Trusted Publishing when it does not. npm and
 crates.io only allow Trusted Publishing for packages that already exist, so the first release needs their
 tokens.
+
+Since 0.1.0 this repository publishes to NuGet, npm and crates.io with Trusted Publishing; only Maven Central
+uses secrets.

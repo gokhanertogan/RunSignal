@@ -211,12 +211,141 @@ public class WorkloadTests
     }
 
     [Fact]
+    public void Active_run_age_is_reported_as_zero_for_workloads_with_a_max_duration_before_their_first_run()
+    {
+        var name = TestNames.Unique("active-idle");
+        using var recorder = new MetricRecorder(name);
+        s_registry.Get(name, o => o.MaxDuration = TimeSpan.FromMinutes(30));
+
+        recorder.CollectObservable();
+
+        Assert.Equal(0, Assert.Single(recorder.Of(Instruments.ActiveRunAge)).Value);
+    }
+
+    [Fact]
+    public void Active_run_age_is_not_reported_for_workloads_without_a_max_duration_until_they_run()
+    {
+        var name = TestNames.Unique("active-none");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name);
+
+        recorder.CollectObservable();
+        Assert.Empty(recorder.Of(Instruments.ActiveRunAge));
+
+        workload.Start().Succeed();
+        recorder.CollectObservable();
+        Assert.Equal(0, Assert.Single(recorder.Of(Instruments.ActiveRunAge)).Value);
+    }
+
+    [Fact]
+    public async Task Active_run_age_grows_while_a_run_is_in_progress_and_returns_to_zero_when_it_ends()
+    {
+        var name = TestNames.Unique("active-run");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name);
+
+        var oldest = workload.Start();
+        await Task.Delay(100);
+        var newer = workload.Start();
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.ActiveRunAge).Last().Value >= 0.09);
+
+        // The oldest run decides the age; the newer one alone is younger.
+        oldest.Succeed();
+        recorder.CollectObservable();
+        Assert.InRange(recorder.Of(Instruments.ActiveRunAge).Last().Value, 0, 0.09);
+
+        newer.Fail("boom");
+        recorder.CollectObservable();
+        Assert.Equal(0, recorder.Of(Instruments.ActiveRunAge).Last().Value);
+    }
+
+    [Fact]
+    public async Task Ending_a_run_twice_does_not_end_another_run_in_progress()
+    {
+        var name = TestNames.Unique("active-twice");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name);
+
+        var first = workload.Start();
+        first.Succeed();
+        await Task.Delay(20);
+        var second = workload.Start(); // takes the slot the first run freed
+        first.Succeed();
+        await Task.Delay(50);
+
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.ActiveRunAge).Last().Value >= 0.04);
+        second.Succeed();
+    }
+
+    [Fact]
+    public void Runs_beyond_the_tracked_slots_are_recorded_but_not_tracked()
+    {
+        var name = TestNames.Unique("active-many");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name);
+
+        var runs = Enumerable.Range(0, 100).Select(_ => workload.Start()).ToList();
+        recorder.CollectObservable();
+        Assert.True(recorder.Of(Instruments.ActiveRunAge).Last().Value >= 0);
+
+        foreach (var run in runs)
+            run.Succeed();
+        recorder.CollectObservable();
+        Assert.Equal(0, recorder.Of(Instruments.ActiveRunAge).Last().Value);
+        Assert.Equal(100, recorder.Of(Instruments.Runs).Sum(m => m.Value));
+    }
+
+    [Fact]
+    public void Discard_ends_the_run_without_recording_it()
+    {
+        var name = TestNames.Unique("discard");
+        using var recorder = new MetricRecorder(name);
+        var workload = s_registry.Get(name);
+
+        workload.Start().Discard();
+
+        recorder.CollectObservable();
+        Assert.Empty(recorder.Of(Instruments.Runs));
+        Assert.Empty(recorder.Of(Instruments.Duration));
+        Assert.Equal(0, Assert.Single(recorder.Of(Instruments.ActiveRunAge)).Value);
+    }
+
+    [Fact]
     public void Default_run_is_a_no_op()
     {
         var run = default(WorkloadRun);
         run.Succeed();
         run.Fail("x");
+        run.Discard();
         Assert.Null(run.Workload);
         Assert.Equal(TimeSpan.Zero, run.Elapsed);
+    }
+}
+
+// Listeners that other tests start record on whichever thread measures, and allocate there, so this runs alone.
+[CollectionDefinition(nameof(AllocationTests), DisableParallelization = true)]
+public class AllocationTestsCollection;
+
+[Collection(nameof(AllocationTests))]
+public class AllocationTests
+{
+    private static readonly WorkloadRegistry s_registry = new();
+
+    [Fact]
+    public void Starting_and_ending_runs_does_not_allocate_after_the_first_run()
+    {
+        var workload = s_registry.Get(TestNames.Unique("alloc"));
+        workload.Start().Succeed(); // allocates the tracking slots once
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            workload.Start().Succeed();
+            workload.Start().Fail("boom");
+        }
+
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 }

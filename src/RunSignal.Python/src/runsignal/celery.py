@@ -80,25 +80,40 @@ class _Instrumentation:
     def __init__(self, registry: WorkloadRegistry, workloads: Mapping[str, Mapping[str, Any]]) -> None:
         self.registry = registry
         self.workloads = workloads
-        self.runs: dict[str, Run] = {}
+        # Runs by task id. A list, so a task id that runs again before the first run ends (a redelivery, or a nested
+        # eager apply) cannot drop a run without ending it, which would leave it in progress and look hung.
+        self.runs: dict[str, list[Run]] = {}
         self.errors: dict[str, BaseException] = {}
+        self.task_workloads: dict[str, Workload] = {}
         self.lock = threading.Lock()
 
     def workload(self, task: Task) -> Workload | None:
-        workload = _task_workloads.get(task.name)
+        workload = self.task_workloads.get(task.name)
         if workload is None:
             if task.name.startswith("celery."):
                 return None
             name = workload_name_of(task)
             workload = self.registry.get_or_add(name, **self.workloads.get(name, {}))
-            _task_workloads[task.name] = workload
+            self.task_workloads[task.name] = workload
+            # workload_of answers for the first instrumented registry; with several, each records on its own.
+            _task_workloads.setdefault(task.name, workload)
         return workload
 
     def prerun(self, task_id: str = "", task: Task | None = None, **_: Any) -> None:
         workload = self.workload(task) if task is not None else None
         if workload is not None:
             with self.lock:
-                self.runs[task_id] = workload.start()
+                self.runs.setdefault(task_id, []).append(workload.start())
+
+    # Called with the lock held.
+    def _pop(self, task_id: str) -> Run | None:
+        runs = self.runs.get(task_id)
+        if not runs:
+            return None
+        run = runs.pop()
+        if not runs:
+            del self.runs[task_id]
+        return run
 
     def failure(self, task_id: str = "", exception: BaseException | None = None, **_: Any) -> None:
         if exception is not None:
@@ -112,7 +127,7 @@ class _Instrumentation:
 
     def postrun(self, task_id: str = "", state: str | None = None, **_: Any) -> None:
         with self.lock:
-            run = self.runs.pop(task_id, None)
+            run = self._pop(task_id)
             error = self.errors.pop(task_id, None)
         if run is None:
             return
@@ -130,7 +145,7 @@ class _Instrumentation:
         if request is None:
             return
         with self.lock:
-            run = self.runs.pop(request.id, None)
+            run = self._pop(request.id)
             self.errors.pop(request.id, None)
         if run is not None:
             run.cancel()
@@ -160,11 +175,14 @@ def instrument(
     if id(registry) not in _instrumented:
         handler = _Instrumentation(registry, workloads)
         _instrumented[id(registry)] = handler
-        signals.task_prerun.connect(handler.prerun, weak=False)
-        signals.task_failure.connect(handler.failure, weak=False)
-        signals.task_retry.connect(handler.retry, weak=False)
-        signals.task_postrun.connect(handler.postrun, weak=False)
-        signals.task_revoked.connect(handler.revoked, weak=False)
+        # Celery identifies a bound-method receiver by its function alone, so without a dispatch_uid the handlers
+        # of a second registry would be taken for those of the first and silently not connected.
+        uid = f"runsignal-{id(handler)}"
+        signals.task_prerun.connect(handler.prerun, weak=False, dispatch_uid=uid)
+        signals.task_failure.connect(handler.failure, weak=False, dispatch_uid=uid)
+        signals.task_retry.connect(handler.retry, weak=False, dispatch_uid=uid)
+        signals.task_postrun.connect(handler.postrun, weak=False, dispatch_uid=uid)
+        signals.task_revoked.connect(handler.revoked, weak=False, dispatch_uid=uid)
 
     if app is None:
         return []

@@ -18,6 +18,7 @@ public final class RunSignalTelemetry {
   public static final String METRIC_HEARTBEATS = "runsignal.workload.heartbeats";
   public static final String METRIC_SINCE_SUCCESS = "runsignal.workload.since_success";
   public static final String METRIC_SINCE_HEARTBEAT = "runsignal.workload.since_heartbeat";
+  public static final String METRIC_ACTIVE_RUN_AGE = "runsignal.workload.active_run_age";
 
   public static final String ATTRIBUTE_WORKLOAD = "runsignal.workload";
   public static final String ATTRIBUTE_OUTCOME = "runsignal.outcome";

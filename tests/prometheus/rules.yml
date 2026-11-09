@@ -42,6 +42,16 @@ groups:
         annotations:
           summary: 'billing/nightly-invoice: overrun'
           description: 'A run of nightly-invoice took longer than 30m (limit 30m, rounded up to a histogram bucket).'
+      - alert: RunSignalHung
+        expr: 'max by (job, runsignal_workload) (runsignal_workload_active_run_age_seconds{job="billing", runsignal_workload="nightly-invoice"}) > 1800'
+        for: 1m
+        labels:
+          severity: critical
+          runsignal_alert: hung
+          runsignal_workload: 'nightly-invoice'
+        annotations:
+          summary: 'billing/nightly-invoice: hung'
+          description: 'A run of nightly-invoice has been running for longer than 30m and has not finished: it may be hung, or the code never ends the run.'
       - alert: RunSignalLowOutput
         expr: 'sum by (job, runsignal_workload) (increase(runsignal_workload_items_total{job="billing", runsignal_workload="nightly-invoice", runsignal_item_result="processed"}[1h])) / sum by (job, runsignal_workload) (increase(runsignal_workload_runs_total{job="billing", runsignal_workload="nightly-invoice", runsignal_outcome="success"}[1h])) < 100'
         for: 0s

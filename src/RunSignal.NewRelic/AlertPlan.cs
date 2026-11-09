@@ -23,6 +23,9 @@ public enum AlertKind
 
     /// <summary>The share of failed items exceeded the threshold.</summary>
     ItemFailureRate,
+
+    /// <summary>A run has been in progress for longer than the workload's maximum duration and has not finished.</summary>
+    Hung,
 }
 
 /// <summary>How a condition aggregates data before evaluating it, matching New Relic's <c>aggregationMethod</c>.</summary>

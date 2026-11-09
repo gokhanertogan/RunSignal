@@ -28,7 +28,7 @@ public sealed partial class WorkloadRegistry : IDisposable
             _meter = meterFactory.Create(RunSignalTelemetry.MeterName, WorkloadInstruments.Version);
         }
 
-        _instruments = new WorkloadInstruments(_meter, ObserveSinceSuccess, ObserveSinceHeartbeat);
+        _instruments = new WorkloadInstruments(_meter, ObserveSinceSuccess, ObserveSinceHeartbeat, ObserveActiveRunAge);
     }
 
     /// <summary>A process-wide registry for code that does not use dependency injection.</summary>
@@ -191,6 +191,15 @@ public sealed partial class WorkloadRegistry : IDisposable
         foreach (var workload in _workloads.Values)
         {
             if (workload.TryGetSecondsSinceHeartbeat(out var seconds))
+                yield return new Measurement<double>(seconds, new KeyValuePair<string, object?>(RunSignalTelemetry.Attributes.Workload, workload.Name));
+        }
+    }
+
+    private IEnumerable<Measurement<double>> ObserveActiveRunAge()
+    {
+        foreach (var workload in _workloads.Values)
+        {
+            if (workload.TryGetActiveRunAge(out var seconds))
                 yield return new Measurement<double>(seconds, new KeyValuePair<string, object?>(RunSignalTelemetry.Attributes.Workload, workload.Name));
         }
     }

@@ -44,6 +44,13 @@ public class AlertPlannerTests
         var overrun = Single(plan, AlertKind.Overrun);
         Assert.Equal(1800, overrun.Threshold);
         Assert.Contains("max(runsignal.workload.duration)", overrun.Nrql);
+
+        // A run that never finishes never reaches the histogram, so the in-progress gauge catches it.
+        var hung = Single(plan, AlertKind.Hung);
+        Assert.Equal(1800, hung.Threshold);
+        Assert.Equal("SELECT max(runsignal.workload.active_run_age) FROM Metric WHERE service.name = 'billing' AND runsignal.workload = 'report'", hung.Nrql);
+        Assert.Equal(AggregationMethod.EventFlow, hung.AggregationMethod);
+        Assert.Null(hung.LossOfSignalSeconds);
     }
 
     [Fact]

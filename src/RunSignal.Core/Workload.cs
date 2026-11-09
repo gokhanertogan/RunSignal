@@ -25,6 +25,11 @@ public sealed class Workload
     private bool _hasStarted;
     private bool _hasBeaten;
 
+    // Start timestamps of the runs in progress, 0 for a free slot. Allocated on the first run. A run claims a slot
+    // when it starts and frees it when it ends, so the oldest one gives active_run_age without allocating per run.
+    private const int ActiveRunSlots = 64;
+    private long[]? _activeRuns;
+
     internal Workload(string name, WorkloadOptions options, WorkloadInstruments instruments)
     {
         Name = name;
@@ -47,7 +52,8 @@ public sealed class Workload
         activity?.SetTag(RunSignalTelemetry.Attributes.Workload, Name);
         if (!_hasStarted)
             _hasStarted = true;
-        return new WorkloadRun(this, Stopwatch.GetTimestamp(), activity);
+        var timestamp = Stopwatch.GetTimestamp();
+        return new WorkloadRun(this, timestamp, TrackStart(timestamp), activity);
     }
 
     /// <summary>
@@ -138,8 +144,65 @@ public sealed class Workload
         return _hasBeaten || Options.ExpectEvery is not null;
     }
 
-    internal void Complete(long startTimestamp, Activity? activity, Outcome outcome, string? errorType, Exception? exception, string? description)
+    // Seconds the oldest run in progress has been running, or 0. Reported for workloads that have a maximum
+    // duration or have run, so the hung alert has a value to evaluate, and closes, while nothing is running.
+    internal bool TryGetActiveRunAge(out double seconds)
     {
+        seconds = 0;
+        if (Volatile.Read(ref _activeRuns) is { } runs)
+        {
+            var oldest = long.MaxValue;
+            for (var i = 0; i < runs.Length; i++)
+            {
+                var start = Volatile.Read(ref runs[i]);
+                if (start != 0 && start < oldest)
+                    oldest = start;
+            }
+            if (oldest != long.MaxValue)
+                seconds = Math.Max(0, Stopwatch.GetElapsedTime(oldest).TotalSeconds);
+        }
+        return _hasStarted || Options.MaxDuration is not null;
+    }
+
+    // Returns the claimed slot, or -1 when every slot is taken; such a run is not tracked.
+    private int TrackStart(long timestamp)
+    {
+        var runs = Volatile.Read(ref _activeRuns);
+        if (runs is null)
+        {
+            Interlocked.CompareExchange(ref _activeRuns, new long[ActiveRunSlots], null);
+            runs = _activeRuns!;
+        }
+
+        for (var i = 0; i < runs.Length; i++)
+        {
+            if (Volatile.Read(ref runs[i]) == 0 && Interlocked.CompareExchange(ref runs[i], timestamp, 0) == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    // Frees the run's slot only if it still holds this run, so ending a run twice cannot end a newer run.
+    private void TrackEnd(long startTimestamp, int slot)
+    {
+        if (slot >= 0 && _activeRuns is { } runs)
+            Interlocked.CompareExchange(ref runs[slot], 0, startTimestamp);
+    }
+
+    internal void Discard(long startTimestamp, int slot, Activity? activity)
+    {
+        TrackEnd(startTimestamp, slot);
+        if (activity is not null)
+        {
+            activity.ActivityTraceFlags &= ~ActivityTraceFlags.Recorded;
+            activity.IsAllDataRequested = false;
+            activity.Dispose();
+        }
+    }
+
+    internal void Complete(long startTimestamp, int slot, Activity? activity, Outcome outcome, string? errorType, Exception? exception, string? description)
+    {
+        TrackEnd(startTimestamp, slot);
         var now = Stopwatch.GetTimestamp();
         var seconds = Stopwatch.GetElapsedTime(startTimestamp, now).TotalSeconds;
         var outcomeTag = outcome switch

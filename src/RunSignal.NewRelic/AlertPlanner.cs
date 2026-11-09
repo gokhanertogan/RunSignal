@@ -95,13 +95,25 @@ public static class AlertPlanner
                     Name = $"{workload.Name}: overrun",
                     Workload = workload.Name,
                     Kind = AlertKind.Overrun,
-                    Description = $"{ManagedMarker} A run of {workload.Name} took longer than {Format(TimeSpan.FromSeconds(maxDuration))}. A run that never finishes shows up as missed or stalled instead.",
+                    Description = $"{ManagedMarker} A run of {workload.Name} took longer than {Format(TimeSpan.FromSeconds(maxDuration))}. A run that has not finished yet opens the hung alert instead.",
                     Nrql = $"SELECT max({Instruments.Duration}) FROM Metric WHERE {where}",
                     Above = true,
                     Threshold = maxDuration,
                     AggregationWindowSeconds = 60,
                     AggregationMethod = AggregationMethod.EventTimer,
                     AggregationTimerSeconds = 60,
+                });
+                conditions.Add(new AlertCondition
+                {
+                    Name = $"{workload.Name}: hung",
+                    Workload = workload.Name,
+                    Kind = AlertKind.Hung,
+                    Description = $"{ManagedMarker} A run of {workload.Name} has been running for longer than {Format(TimeSpan.FromSeconds(maxDuration))} and has not finished: it may be hung, or the code never ends the run.",
+                    Nrql = $"SELECT max({Instruments.ActiveRunAge}) FROM Metric WHERE {where}",
+                    Above = true,
+                    Threshold = maxDuration,
+                    AggregationWindowSeconds = 60,
+                    AggregationMethod = AggregationMethod.EventFlow,
                 });
             }
 

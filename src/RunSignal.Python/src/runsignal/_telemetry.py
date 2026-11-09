@@ -14,6 +14,7 @@ class Metrics:
     HEARTBEATS = "runsignal.workload.heartbeats"
     SINCE_SUCCESS = "runsignal.workload.since_success"
     SINCE_HEARTBEAT = "runsignal.workload.since_heartbeat"
+    ACTIVE_RUN_AGE = "runsignal.workload.active_run_age"
 
 
 class Attributes:

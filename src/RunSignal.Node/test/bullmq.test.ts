@@ -64,6 +64,7 @@ describe('BullMQ', () => {
     const runs = Object.fromEntries((m[Metrics.runs] ?? []).map((p) => [`${p.attributes[Attributes.outcome]}:${p.attributes[Attributes.errorType] ?? ''}`, p.value]));
     assert.deepEqual(runs, { 'success:': 1, 'failure:ESMTP': 1 });
     assert.equal(m[Metrics.items]?.[0]?.value, 3);
+    assert.deepEqual(m[Metrics.activeRunAge]?.map((p) => p.value), [0]); // every job's run ended
     assert.equal(registry.workload('emails.send-welcome').expectations.severity, 'critical');
   });
 

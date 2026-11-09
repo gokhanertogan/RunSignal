@@ -38,6 +38,12 @@ public static class RunSignalTelemetry
         /// Reported for workloads that expect heartbeats or have sent one. Alerts on stalled loops use it.
         /// </summary>
         public const string SinceHeartbeat = "runsignal.workload.since_heartbeat";
+
+        /// <summary>
+        /// Gauge of the seconds the oldest unfinished run has been running, or 0 while no run is in progress.
+        /// Reported for workloads that have a maximum duration or have started a run. Alerts on hung runs use it.
+        /// </summary>
+        public const string ActiveRunAge = "runsignal.workload.active_run_age";
     }
 
     /// <summary>Attribute (tag) names.</summary>
