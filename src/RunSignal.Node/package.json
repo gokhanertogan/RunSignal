@@ -1,6 +1,6 @@
 {
   "name": "@runsignal/node",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Cron job and background job monitoring for Node.js with OpenTelemetry: alert when a scheduled job is missed, fails, overruns or stalls, or a BullMQ queue stops processing. Works with node-cron, croner, cron, node-schedule and BullMQ; alerts for New Relic, Prometheus and Grafana.",
   "license": "MIT",
   "author": "Gokhan Ertogan",

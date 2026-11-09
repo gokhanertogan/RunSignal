@@ -22,12 +22,12 @@ backends.
 <dependency>
   <groupId>io.github.gokhanertogan.runsignal</groupId>
   <artifactId>runsignal-spring-boot-starter</artifactId>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
 </dependency>
 ```
 
 ```kotlin
-implementation("io.github.gokhanertogan.runsignal:runsignal-spring-boot-starter:0.2.0") // Gradle
+implementation("io.github.gokhanertogan.runsignal:runsignal-spring-boot-starter:0.3.0") // Gradle
 ```
 
 Requires Java 17 or later. The starter is tested against Spring Boot 3.2, 3.5 and 4.1 (Spring Framework 6.1, 6.2

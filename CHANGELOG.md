@@ -4,7 +4,7 @@ All notable changes to RunSignal are recorded here. Every SDK and package in thi
 with the same version number. The project follows [Semantic Versioning](https://semver.org/); until 1.0, minor
 versions may contain breaking changes.
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-11-10)
 
 ### Added
 - The CLI as a native executable of about 10 MB with no .NET dependency, for images and machines without .NET:
