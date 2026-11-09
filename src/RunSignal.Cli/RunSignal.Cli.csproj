@@ -14,6 +14,18 @@
     <PackageTags>$(PackageTags);cli;dotnet-tool;nerdgraph;alerts-as-code</PackageTags>
   </PropertyGroup>
 
+  <!-- dotnet publish -p:RunSignalNative=true -r linux-x64: a self-contained native executable for machines and
+       container images without .NET, such as Kubernetes CronJobs running runsignal exec. Set here, not as a global
+       PublishAot, so the referenced net8.0 libraries are not compiled ahead of time themselves. -->
+  <PropertyGroup Condition="'$(RunSignalNative)' == 'true'">
+    <TargetFramework>net10.0</TargetFramework>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>runsignal</AssemblyName>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.0" />
     <PackageReference Include="OpenTelemetry" Version="1.15.3" />

@@ -1,0 +1,13 @@
+# Only the .NET sources go into image builds (src/RunSignal.Cli/Dockerfile).
+**/bin/
+**/obj/
+.git/
+src/RunSignal.Java/
+src/RunSignal.Node/
+src/RunSignal.Python/
+src/RunSignal.Rust/
+go/
+samples/
+tests/
+benchmarks/
+BenchmarkDotNet.Artifacts/

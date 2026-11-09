@@ -10,6 +10,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="RunSignal.Tests" />
     <InternalsVisibleTo Include="RunSignal.Cli" />
+    <!-- The CLI's native binary (RunSignalNative=true) is named runsignal. -->
+    <InternalsVisibleTo Include="runsignal" />
   </ItemGroup>
 
 </Project>

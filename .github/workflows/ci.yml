@@ -6,6 +6,49 @@ on:
   pull_request:
 
 jobs:
+  cli-native:
+    name: CLI native binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          file: src/RunSignal.Cli/Dockerfile
+          tags: runsignal:ci
+          load: true
+      # The oldest glibc the binary promises (Debian 10, glibc 2.28), and Alpine for the musl one. The command's
+      # exit code must come back unchanged.
+      - name: Run it where users will
+        run: |
+          id=$(docker create runsignal:ci)
+          docker cp "$id:/runsignal" ./runsignal && docker cp "$id:/runsignal-musl" ./runsignal-musl && docker rm "$id"
+          check() {
+            code=0
+            docker run --rm -v "$PWD/$1:/rs:ro" "$2" /rs exec -w ci --service ci -- sh -c 'exit 7' || code=$?
+            echo "$1 on $2: exit $code"
+            test "$code" = 7
+          }
+          check runsignal debian:10-slim
+          check runsignal-musl alpine:3.22
+
+  cli-native-desktop:
+    name: CLI native binary (${{ matrix.rid }})
+    strategy:
+      matrix:
+        include:
+          - { rid: osx-arm64, runner: macos-15 }
+          - { rid: win-x64, runner: windows-2025 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet publish src/RunSignal.Cli -c Release -r ${{ matrix.rid }} -p:RunSignalNative=true -o out
+      - run: ./out/runsignal exec -w ci --service ci -- dotnet --version
+        shell: bash
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -18,7 +61,7 @@ jobs:
       - run: dotnet test -c Release
       - name: Check the Prometheus rules with promtool
         run: |
-          curl -sL https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.linux-amd64.tar.gz | tar xz
+          curl -fsSL --retry 3 https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.linux-amd64.tar.gz | tar xz
           prometheus-3.15.1.linux-amd64/promtool test rules tests/prometheus/rules.test.yml tests/prometheus/rules-per-run.test.yml
       - run: |
           dotnet pack src/RunSignal.Core -c Release -o artifacts

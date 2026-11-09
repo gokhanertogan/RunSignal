@@ -7,6 +7,9 @@ versions may contain breaking changes.
 ## 0.3.0 (unreleased)
 
 ### Added
+- The CLI as a native executable of about 10 MB with no .NET dependency, for images and machines without .NET:
+  - release assets for Linux (glibc 2.28+ and musl, x64 and arm64), macOS and Windows;
+  - the container image `ghcr.io/gokhanertogan/runsignal` to `COPY --from` (`/runsignal`, `/runsignal-musl`).
 - `runsignal exec`: runs any command (a shell script, a crontab entry, a container in a Kubernetes CronJob) as one
   run of a workload and exports it over OTLP. Exit code 0 is a success, other codes fail with `error.type`
   `exit_code_<n>`, and stop signals are forwarded and count as cancelled. The command's exit code is returned.
@@ -27,6 +30,8 @@ versions may contain breaking changes.
   vetoed jobs.
 
 ### Fixed
+- `runsignal exec` no longer crashes after the command has run when it exports over HTTPS in an image without
+  OpenSSL; it warns, skips the export and returns the command's exit code.
 - Alert descriptions formatted durations with the machine's culture ("1,5h" on a Turkish machine, "1.5h" in CI),
   so `provision` from two machines kept updating the same conditions. They are now culture-invariant.
 - Python: a second `WorkloadRegistry` on the same meter provider (for example one you create next to

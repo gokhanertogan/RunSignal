@@ -19,6 +19,13 @@ section for it. It then:
 Each registry job can be re-run on its own. Pushes that already happened are skipped on NuGet; npm,
 crates.io and Maven Central reject a version that already exists.
 
+The CLI is also released as native executables (release assets, with `SHA256SUMS`) and as the container image
+`ghcr.io/gokhanertogan/runsignal`, tagged with the version and `latest`.
+- Linux binaries are built inside `src/RunSignal.Cli/Dockerfile` on AlmaLinux 8, so they need only glibc 2.28.
+  CI runs them on Debian 10 and Alpine.
+- The image is pushed with the workflow's `GITHUB_TOKEN`. A new GitHub package starts private: after the first
+  release, make `runsignal` public in the package settings.
+
 ## Credentials
 
 | Registry | First release | Afterwards |
