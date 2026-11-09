@@ -104,6 +104,59 @@ public class AlertPlannerTests
 
         Assert.Contains("service.name = 'it\\'s'", Single(plan, AlertKind.Stalled).Nrql);
     }
+
+    [Fact]
+    public void Per_run_workloads_detect_missed_runs_from_successes_not_the_gauge()
+    {
+        var plan = AlertPlanner.Plan(Manifest(new WorkloadManifestEntry
+        {
+            Name = "hourly-export",
+            Schedule = "0 * * * *",
+            MaxDurationSeconds = 600,
+            Reporting = WorkloadReporting.PerRun,
+        }), s_options);
+
+        // The process exists only during a run, so since_success and a 15-minute loss of signal would fire after
+        // every run. Only successes produce data; loss of signal after the schedule plus grace is the alert.
+        var missed = Single(plan, AlertKind.Missed);
+        Assert.Equal("SELECT sum(runsignal.workload.runs) FROM Metric WHERE service.name = 'billing' AND runsignal.workload = 'hourly-export' AND runsignal.outcome = 'success'", missed.Nrql);
+        Assert.Equal(3600 + 600, missed.LossOfSignalSeconds);
+        Assert.False(missed.Above);
+        Assert.Equal(1, missed.Threshold);
+        Assert.Equal(AggregationMethod.EventTimer, missed.AggregationMethod);
+        Assert.Single(plan.Policies.SelectMany(p => p.Conditions), c => c.Kind == AlertKind.Hung);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public void Per_run_workloads_get_no_missed_alert_beyond_new_relics_loss_of_signal_limit_and_no_stalled_alert()
+    {
+        var plan = AlertPlanner.Plan(Manifest(new WorkloadManifestEntry
+        {
+            Name = "weekly-report",
+            Schedule = "0 6 * * 1",
+            ExpectEverySeconds = 60,
+            Reporting = WorkloadReporting.PerRun,
+        }), s_options);
+
+        Assert.DoesNotContain(plan.Policies.SelectMany(p => p.Conditions), c => c.Kind is AlertKind.Missed or AlertKind.Stalled);
+        // A week plus 15 minutes of grace, against New Relic's 48-hour loss of signal.
+        Assert.Contains(plan.Warnings, w => w.StartsWith("weekly-report: no missed-run alert, because New Relic cannot wait 168.3h", StringComparison.Ordinal) && w.EndsWith("limited to 2d.", StringComparison.Ordinal));
+        Assert.Contains(plan.Warnings, w => w.StartsWith("weekly-report: no stalled alert", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_workloads_time_zone_decides_its_schedule_gaps()
+    {
+        // 02:00 every day in New York: the clocks go back on 2026-11-01, so one gap is 25 hours. Read as UTC it never is.
+        var newYork = AlertPlanner.Plan(Manifest(new WorkloadManifestEntry { Name = "nightly", Schedule = "0 2 * * *", TimeZone = "America/New_York" }), s_options);
+        Assert.Equal(25 * 3600 + 900, Single(newYork, AlertKind.Missed).Threshold);
+        var utc = AlertPlanner.Plan(Manifest(new WorkloadManifestEntry { Name = "nightly", Schedule = "0 2 * * *" }), s_options);
+        Assert.Equal(24 * 3600 + 900, Single(utc, AlertKind.Missed).Threshold);
+
+        var unknown = AlertPlanner.Plan(Manifest(new WorkloadManifestEntry { Name = "nightly", Schedule = "0 2 * * *", TimeZone = "Mars/Olympus" }), s_options);
+        Assert.Contains(unknown.Warnings, w => w.Contains("Time zone 'Mars/Olympus' is not known", StringComparison.Ordinal));
+    }
 }
 
 public sealed class NewRelicProvisionerTests : IDisposable

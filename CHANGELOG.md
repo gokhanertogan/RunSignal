@@ -7,6 +7,16 @@ versions may contain breaking changes.
 ## 0.3.0 (unreleased)
 
 ### Added
+- `runsignal exec`: runs any command (a shell script, a crontab entry, a container in a Kubernetes CronJob) as one
+  run of a workload and exports it over OTLP. Exit code 0 is a success, other codes fail with `error.type`
+  `exit_code_<n>`, and stop signals are forwarded and count as cancelled. The command's exit code is returned.
+- `runsignal discover kubernetes`: writes a manifest from Kubernetes CronJobs, with their schedules, time zones and
+  `activeDeadlineSeconds`, plus `runsignal.io/*` annotations for severity, max duration, minimum output, failure
+  rate, workload name and opting out.
+- Manifest: `"reporting": "per-run"` for workloads whose runs are short-lived processes. `missed` then means no
+  successful run within the schedule plus grace, and there is no not-reporting or stalled alert. On New Relic,
+  per-run `missed` needs a run at least every 48 hours.
+- Manifest: a per-workload `timeZone` for its schedule.
 - Hung runs: a new `runsignal.workload.active_run_age` gauge in every SDK reports how long the oldest unfinished
   run has been running (0 when none is). It is reported for workloads that have `maxDuration` or have started a
   run. New Relic gets a `hung` condition and Prometheus a `RunSignalHung` rule, which open when an unfinished run
@@ -17,6 +27,8 @@ versions may contain breaking changes.
   vetoed jobs.
 
 ### Fixed
+- Alert descriptions formatted durations with the machine's culture ("1,5h" on a Turkish machine, "1.5h" in CI),
+  so `provision` from two machines kept updating the same conditions. They are now culture-invariant.
 - Python: a second `WorkloadRegistry` on the same meter provider (for example one you create next to
   `default_registry`) silently lost its gauges, so its workloads never got `missed`, `stalled` or `hung` alerts.
   Registries on one provider now share their gauges.

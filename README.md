@@ -67,6 +67,7 @@ like your HTTP endpoints, without another SaaS and without pinging a URL from ev
 - [Concepts](#concepts)
 - [Quick start](#quick-start)
 - [Integrations](#integrations)
+- [Scripts, crontab and Kubernetes CronJobs](#scripts-crontab-and-kubernetes-cronjobs)
 - [GitHub Actions](#github-actions)
 - [Alerts](#alerts)
 - [Backends](#backends): [New Relic](#new-relic), [Prometheus and Grafana](#prometheus-and-grafana)
@@ -277,6 +278,64 @@ workloads are registered.
 Scheduler integrations also register jobs as workloads **at startup**, with their cron schedules, so a job
 that never fires still gets a `missed` alert.
 
+## Scripts, crontab and Kubernetes CronJobs
+
+Work with no RunSignal SDK, such as a shell script, a crontab entry or a container in a Kubernetes CronJob, can
+report through `runsignal exec`. It runs the command as one run of a workload and exports it over OTLP:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.eu01.nr-data.net:4318 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+OTEL_EXPORTER_OTLP_HEADERS="api-key=$NEW_RELIC_LICENSE_KEY" \
+OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta \
+runsignal exec --workload nightly-invoice --service billing -- ./export-invoices.sh --date today
+```
+
+- **Outcome:** exit code 0 is a successful run. Any other code is a failure with `error.type` `exit_code_<n>`,
+  and a command that cannot start fails as `command_not_found` with code 127. SIGTERM, SIGINT, SIGQUIT and SIGHUP
+  are forwarded to the command, and the run counts as cancelled.
+- **Exit code:** the command's output and exit code pass through unchanged.
+- **While it runs:** it reports `active_run_age`, so a run that hangs opens `hung` while it is still hanging.
+- **Configuration:** the exporter takes the standard `OTEL_EXPORTER_OTLP_*` variables. `--service` defaults to
+  `OTEL_SERVICE_NAME`.
+
+Each run is its own process, so these workloads report **per run** (`"reporting": "per-run"` in the manifest).
+Silence between runs is normal, so the alerts work differently:
+
+| | Continuous (SDK in a long-running process) | Per run (`runsignal exec`) |
+|---|---|---|
+| `missed` | `since_success` passes the schedule plus grace | No successful run within the schedule plus grace, once a first success has been seen |
+| `not reporting` | ✅ | none: silence is normal |
+| `stalled` | ✅ | none: needs a long-running process |
+| `failed`, `overrun`, `hung`, `low output`, failure rates | ✅ | ✅ |
+| Limits | | New Relic: `missed` needs a run at least every 48 hours (loss of signal). Prometheus: the alert closes four schedule gaps after the last success. |
+
+**Kubernetes CronJobs.** Run the container's command through `runsignal exec`, then write the manifest from the
+cluster:
+
+```sh
+runsignal discover kubernetes --service billing --namespace billing -o billing.json
+runsignal provision billing.json --account-id 1234567 --region EU
+```
+
+`discover kubernetes` runs `kubectl get cronjobs -o json`, or reads its output with `--input` (`-` for standard
+input). It writes:
+- one per-run workload per CronJob, named after it;
+- the schedule (macros such as `@hourly` included);
+- the time zone, from `spec.timeZone` or a `CRON_TZ=` prefix;
+- `activeDeadlineSeconds` as the max duration.
+
+Suspended CronJobs are skipped. Annotations set the rest:
+
+| Annotation | Example |
+|---|---|
+| `runsignal.io/workload` | `bank-statement-import` (the name `runsignal exec --workload` uses) |
+| `runsignal.io/severity` | `critical` |
+| `runsignal.io/max-duration` | `45m` (overrides `activeDeadlineSeconds`) |
+| `runsignal.io/min-processed` | `100` |
+| `runsignal.io/failure-rate` | `0.2` |
+| `runsignal.io/ignore` | `true` |
+
 ## GitHub Actions
 
 Provision alerts on every deploy with the bundled action:
@@ -361,13 +420,17 @@ It has data source, service and workload variables; without manifests it shows e
 | `destroy --service <name> --account-id <id> [--dry-run]` | Removes what RunSignal created for a service. |
 | `export prometheus <manifests> [-o rules.yml]` | Writes Prometheus alerting rules. |
 | `export grafana [manifests] [-o dashboard.json]` | Writes a Grafana dashboard for the Prometheus metrics. |
+| `exec --workload <name> [--service <name>] -- <command>` | Runs a command as one run of a workload and exports it over OTLP. |
+| `discover kubernetes --service <name> [-n <ns> \| -A] [--input <file>] [-o manifest.json]` | Writes a manifest of per-run workloads from Kubernetes CronJobs. |
 
 Common options:
-- `--time-zone Europe/Istanbul` sets the time zone schedules run in (default UTC).
+- `--time-zone Europe/Istanbul` sets the time zone schedules run in (default UTC). A workload's own `timeZone` in
+  the manifest takes precedence.
 - `--missed-grace` and `--not-reporting-after` set the grace periods, in minutes.
 - `NEW_RELIC_API_KEY` holds the User API key.
 
-Expected errors print one line and exit with code 1.
+Expected errors print one line and exit with code 1. `exec` returns the command's exit code, or 2 for its own
+usage errors.
 
 ## Signals and specification
 

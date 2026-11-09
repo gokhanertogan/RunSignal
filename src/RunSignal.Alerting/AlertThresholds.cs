@@ -35,9 +35,25 @@ public sealed record MissedThreshold(TimeSpan Interval, TimeSpan Grace)
         ArgumentNullException.ThrowIfNull(options);
         if (workload.Schedule is not { } schedule)
             return null;
-        var interval = CronSchedule.MaxInterval(schedule, options.ScheduleTimeZone, options.Now);
+        var interval = CronSchedule.MaxInterval(schedule, ZoneOf(workload, options), options.Now);
         var grace = workload.MaxDurationSeconds is { } max ? TimeSpan.FromSeconds(max) : options.MissedGrace;
         return new MissedThreshold(interval, grace);
+    }
+
+    // The workload's own time zone wins over the tooling's default. An unknown zone is a schedule that cannot be
+    // read, so callers report it the same way as a bad cron expression.
+    private static TimeZoneInfo ZoneOf(WorkloadManifestEntry workload, AlertOptions options)
+    {
+        if (workload.TimeZone is not { } id)
+            return options.ScheduleTimeZone;
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            throw new FormatException($"Time zone '{id}' is not known.", ex);
+        }
     }
 }
 
@@ -45,9 +61,13 @@ public sealed record MissedThreshold(TimeSpan Interval, TimeSpan Grace)
 public static class DurationText
 {
     /// <summary>Formats <paramref name="span"/> in the largest whole unit that reads naturally.</summary>
+    /// <remarks>
+    /// Culture-invariant: the text goes into alert descriptions, which provisioning compares, so it must be the same
+    /// on every machine (a Turkish locale would otherwise write <c>1,5h</c>).
+    /// </remarks>
     public static string Format(TimeSpan span) =>
-        span.TotalDays >= 1 && span.TotalHours % 24 == 0 ? $"{span.TotalDays:0.#}d"
-        : span.TotalHours >= 1 ? $"{span.TotalHours:0.#}h"
-        : span.TotalMinutes >= 1 ? $"{span.TotalMinutes:0.#}m"
-        : $"{span.TotalSeconds:0.#}s";
+        span.TotalDays >= 1 && span.TotalHours % 24 == 0 ? FormattableString.Invariant($"{span.TotalDays:0.#}d")
+        : span.TotalHours >= 1 ? FormattableString.Invariant($"{span.TotalHours:0.#}h")
+        : span.TotalMinutes >= 1 ? FormattableString.Invariant($"{span.TotalMinutes:0.#}m")
+        : FormattableString.Invariant($"{span.TotalSeconds:0.#}s");
 }

@@ -142,6 +142,20 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
 - `hung` condition in New Relic and `RunSignalHung` rule in Prometheus (covered by `promtool test rules`).
 - Follow-up: verify `hung` live on New Relic with the alert drill.
 
+### Work without an SDK ✅
+- `runsignal exec` wraps any command as one run of a workload and exports it over OTLP. It forwards stop signals, passes the exit code through, and gives each run its own `service.instance.id`.
+- Per-run workloads (`"reporting": "per-run"`): silence between runs is normal, so `missed` comes from successful runs.
+  - New Relic: loss of signal on successes, at most 48 hours.
+  - Prometheus: `absent_over_time` over the schedule plus grace, but only for workloads that succeeded within four gaps, so a rule loaded before a job's first run does not fire.
+  - Prometheus rules sum each run's series (`max_over_time`) instead of `increase()`.
+  - Covered by `promtool test rules`.
+- `runsignal discover kubernetes` writes the manifest from CronJobs: schedule macros, `spec.timeZone` and `CRON_TZ=`, `activeDeadlineSeconds`, `runsignal.io/*` annotations.
+- Verified end to end against a local Prometheus 3.15: failed, missed and hung fired from `runsignal exec` runs.
+- Follow-ups:
+  - A single-binary CLI (native AOT) and a container image, so images without .NET can use `runsignal exec`.
+  - Grafana and New Relic dashboards for per-run workloads.
+  - `discover crontab`.
+
 ### Also done
 - `runsignal destroy` removes what RunSignal created for a service, keeps conditions added by hand and never deletes notification channels. Verified live by cleaning up the five sample services.
 

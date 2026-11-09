@@ -28,4 +28,21 @@ public class CronScheduleTests
     [InlineData("99 2 * * *")]
     public void Invalid_expressions_are_rejected(string expression) =>
         Assert.Throws<FormatException>(() => CronSchedule.MaxInterval(expression, from: s_from));
+
+    [Fact]
+    public void Durations_read_the_same_in_every_culture()
+    {
+        // Alert descriptions contain them, and provisioning compares descriptions, so a Turkish machine must not
+        // write "1,5h" where CI writes "1.5h".
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("tr-TR");
+            Assert.Equal("1.5h", RunSignal.Alerting.DurationText.Format(TimeSpan.FromMinutes(90)));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
 }
