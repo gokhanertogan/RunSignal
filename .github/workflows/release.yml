@@ -199,127 +199,20 @@ jobs:
           git push origin "$tag"
           GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "github.com/gokhanertogan/RunSignal/go@${GITHUB_REF_NAME}" || true
 
-  cli-linux:
-    name: CLI for Linux (${{ matrix.arch }})
+  cli:
+    name: CLI
     needs: check
-    strategy:
-      matrix:
-        include:
-          - { arch: x64, platform: linux/amd64, runner: ubuntu-24.04 }
-          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
-    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      # Built natively on each architecture: native AOT does not cross-compile between Linux architectures without a
-      # sysroot. The image is pushed by digest and tagged once both exist (cli-image).
-      - id: build
-        uses: docker/build-push-action@v6
-        with:
-          file: src/RunSignal.Cli/Dockerfile
-          platforms: ${{ matrix.platform }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ needs.check.outputs.version }}
-          outputs: type=image,name=ghcr.io/gokhanertogan/runsignal,push-by-digest=true,name-canonical=true,push=true
-      - name: Keep the digest and take the binaries out of the image
-        run: |
-          mkdir -p digests dist glibc musl
-          touch "digests/${DIGEST#sha256:}"
-          id=$(docker create "ghcr.io/gokhanertogan/runsignal@$DIGEST")
-          docker cp "$id:/runsignal" glibc/runsignal
-          docker cp "$id:/runsignal-musl" musl/runsignal
-          docker rm "$id"
-          ./glibc/runsignal --help > /dev/null
-          version="${{ needs.check.outputs.version }}"
-          tar -czf "dist/runsignal-$version-linux-${{ matrix.arch }}.tar.gz" -C glibc runsignal
-          tar -czf "dist/runsignal-$version-linux-musl-${{ matrix.arch }}.tar.gz" -C musl runsignal
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.arch }}
-          path: digests/*
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cli-linux-${{ matrix.arch }}
-          path: dist/*.tar.gz
-
-  cli-image:
-    name: CLI image
-    needs: [check, cli-linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: digest-*
-          path: digests
-          merge-multiple: true
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Tag both architectures as one image
-        working-directory: digests
-        run: |
-          image=ghcr.io/gokhanertogan/runsignal
-          # One argument per digest file name.
-          # shellcheck disable=SC2046
-          docker buildx imagetools create -t "$image:${{ needs.check.outputs.version }}" -t "$image:latest" \
-            $(printf "$image@sha256:%s " *)
-          docker buildx imagetools inspect "$image:${{ needs.check.outputs.version }}"
-
-  cli-native:
-    name: CLI for ${{ matrix.rid }}
-    needs: check
-    strategy:
-      matrix:
-        include:
-          - { rid: osx-arm64, runner: macos-15, archive: tar.gz }
-          - { rid: osx-x64, runner: macos-15, archive: tar.gz, cross: true }
-          - { rid: win-x64, runner: windows-2025, archive: zip }
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v7
-      # The latest 10.0 SDK: the self-contained binary embeds its runtime, so it must be the patched one.
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-      - run: dotnet publish src/RunSignal.Cli -c Release -r ${{ matrix.rid }} -p:RunSignalNative=true -o out
-      - if: ${{ !matrix.cross }}
-        run: ./out/runsignal --help
-        shell: bash
-      - name: Archive
-        shell: bash
-        run: |
-          name="runsignal-${{ needs.check.outputs.version }}-${{ matrix.rid }}"
-          mkdir dist
-          if [ "${{ matrix.archive }}" = zip ]; then
-            (cd out && 7z a "../dist/$name.zip" runsignal.exe)
-          else
-            tar -czf "dist/$name.tar.gz" -C out runsignal
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cli-${{ matrix.rid }}
-          path: dist/*
+    uses: ./.github/workflows/cli-release.yml
+    with:
+      version: ${{ needs.check.outputs.version }}
+      image-tags: ${{ needs.check.outputs.version }} latest
 
   release:
     name: GitHub release
-    needs: [check, nuget, npm, crates, pypi, maven, go, cli-linux, cli-image, cli-native]
+    needs: [check, nuget, npm, crates, pypi, maven, go, cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write

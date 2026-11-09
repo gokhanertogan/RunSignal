@@ -8,7 +8,11 @@ Every package is released together, with the same version, by
 1. Set the version everywhere: `Directory.Build.props` (`<Version>`), `src/RunSignal.Node/package.json`,
    `src/RunSignal.Rust/Cargo.toml`, and the `<version>` of the three POMs in `src/RunSignal.Java`.
 2. In `CHANGELOG.md`, turn `## X.Y.Z (unreleased)` into `## X.Y.Z (YYYY-MM-DD)`.
-3. Commit, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. Rehearse the CLI build after changing it, the Dockerfile or `.github/workflows/cli-release.yml`:
+   `gh workflow run cli-release.yml` (or Actions > CLI release > Run workflow). It builds every binary and the
+   image, pushes the image as `ghcr.io/gokhanertogan/runsignal:dry-run` and publishes nothing else. A tag cannot
+   be fixed after it is pushed, so rehearse first.
+4. Commit, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 The workflow refuses to publish if any package's version differs from the tag, or the changelog has no
 section for it. It then:
