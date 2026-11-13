@@ -4,7 +4,7 @@ Names of the meter, tracer, instruments and attributes RunSignal emits. They are
 """
 
 SCOPE_NAME = "RunSignal"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 class Metrics:
