@@ -41,6 +41,10 @@ export interface WorkloadOptions {
   failureRateThreshold?: number;
   /** How urgent the workload's alerts are. Defaults to `'warning'`. */
   severity?: Severity;
+  /** Who answers the workload's alerts: a team or person, such as `'billing-team'`. At most 128 characters. */
+  owner?: string;
+  /** Absolute http or https URL of what to do when an alert fires. */
+  runbookUrl?: string;
 }
 
 /** The validated expectations of a workload, with durations in milliseconds. */
@@ -51,6 +55,8 @@ export interface Expectations {
   readonly minProcessed?: number;
   readonly failureRateThreshold?: number;
   readonly severity: Severity;
+  readonly owner?: string;
+  readonly runbookUrl?: string;
 }
 
 export interface RegistryOptions {
@@ -90,14 +96,34 @@ function toExpectations(options: WorkloadOptions): Expectations {
   if (minProcessed !== undefined && (!Number.isInteger(minProcessed) || minProcessed < 0)) throw new WorkloadConfigurationError('minProcessed must be a non-negative integer.');
   const severity = options.severity ?? 'warning';
   if (!['info', 'warning', 'critical'].includes(severity)) throw new WorkloadConfigurationError(`Unknown severity '${severity}'.`);
+  const { owner, runbookUrl } = options;
+  if (owner !== undefined && (typeof owner !== 'string' || owner.trim() === '' || owner.length > 128)) {
+    throw new WorkloadConfigurationError('owner must be a non-blank string of at most 128 characters.');
+  }
+  if (runbookUrl !== undefined && !isHttpUrl(runbookUrl)) {
+    throw new WorkloadConfigurationError(`runbookUrl '${runbookUrl}' must be an absolute http or https URL.`);
+  }
   return {
     severity,
+    ...(owner !== undefined && { owner }),
+    ...(runbookUrl !== undefined && { runbookUrl }),
     ...(options.schedule !== undefined && { schedule: options.schedule }),
     ...(options.maxDuration !== undefined && { maxDurationMs: toMs(options.maxDuration, 'maxDuration') }),
     ...(options.expectEvery !== undefined && { expectEveryMs: toMs(options.expectEvery, 'expectEvery') }),
     ...(minProcessed !== undefined && { minProcessed }),
     ...(rate !== undefined && { failureRateThreshold: rate }),
   };
+}
+
+function isHttpUrl(value: unknown): boolean {
+  // The scheme is matched case-sensitively, as spec/manifest.schema.json does, and whitespace is rejected.
+  if (typeof value !== 'string' || !/^https?:\/\/\S+$/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== '';
+  } catch {
+    return false;
+  }
 }
 
 /** @internal */
@@ -229,6 +255,8 @@ export class WorkloadRegistry {
         ...(e.minProcessed && { minProcessed: e.minProcessed }),
         ...(e.failureRateThreshold && { failureRateThreshold: e.failureRateThreshold }),
         severity: e.severity,
+        ...(e.owner !== undefined && { owner: e.owner }),
+        ...(e.runbookUrl !== undefined && { runbookUrl: e.runbookUrl }),
       })),
     };
   }
@@ -265,6 +293,8 @@ export interface WorkloadManifest {
     minProcessed?: number;
     failureRateThreshold?: number;
     severity: Severity;
+    owner?: string;
+    runbookUrl?: string;
   }>;
 }
 

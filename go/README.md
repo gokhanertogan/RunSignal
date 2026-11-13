@@ -45,6 +45,24 @@ err := invoices.Run(ctx, func(ctx context.Context) error {
 `runsignal.Default` records on the global OpenTelemetry providers, which forward to the SDK whenever it is
 set up. For explicit providers, use `runsignal.NewRegistry(runsignal.WithMeterProvider(mp))`.
 
+## Expectations
+
+Options passed when a workload is created define its alerts; they do not change what is recorded.
+
+| Option | Meaning | Alert |
+|---|---|---|
+| `Schedule("0 2 * * *")` | Cron expression for when the workload should run | `missed` |
+| `MaxDuration(d)` | Longest acceptable run | `overrun`, `hung` |
+| `ExpectEvery(d)` | Longest acceptable gap between heartbeats | `stalled` |
+| `MinProcessed(n)` | Fewest items a run should process | `low-output` |
+| `FailureRateThreshold(0.2)` | Highest acceptable share (0 to 1) of failed runs or items | `failure-rate` |
+| `WithSeverity(runsignal.Critical)` | `Info`, `Warning` (default) or `Critical`; routes notifications | |
+| `Owner("billing-team")` | Who answers the alerts, a team or person; not blank, at most 128 characters | Added to alert descriptions, `owner` label on Prometheus rules |
+| `RunbookURL("https://wiki.example.com/runbooks/invoice")` | Absolute `http`/`https` URL of what to do when an alert fires | Added to alert descriptions, `runbook_url` annotation on Prometheus rules |
+
+Invalid options, such as a blank owner or a relative runbook URL, make `Workload` return an error (and
+`MustWorkload` panic).
+
 ## Recording work
 
 | Call | Records |

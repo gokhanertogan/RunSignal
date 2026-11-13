@@ -143,6 +143,33 @@ while True:
 default_registry.write_manifest_from_env("billing-service")  # writes to RUNSIGNAL_MANIFEST_PATH when it is set
 ```
 
+Every place that takes workload options (`workload`, `get_or_add`, `@monitor`, and the Celery and APScheduler
+`workloads={...}` dicts) accepts these expectations:
+
+| Option | Meaning | Alert |
+|---|---|---|
+| `schedule` | Cron expression for when the workload should run | `missed` |
+| `max_duration` | Longest acceptable run, in seconds, a `timedelta` or a string such as `"30m"` | `overrun` and `hung` |
+| `expect_every` | Longest acceptable gap between heartbeats | `stalled` |
+| `min_processed` | Fewest items a run should process | `low-output` |
+| `failure_rate_threshold` | Highest acceptable share (0 to 1) of failed runs or items | `failure-rate` |
+| `severity` | `"info"`, `"warning"` (default) or `"critical"` | Routing |
+| `owner` | Who answers the alerts: a team or person, such as `"billing-team"` (at most 128 characters) | Added to alert descriptions, and as the `owner` label on Prometheus rules |
+| `runbook_url` | Absolute `http`/`https` URL of what to do when an alert fires | Added to alert descriptions, and as the `runbook_url` annotation on Prometheus rules |
+
+```python
+default_registry.workload(
+    "nightly-invoice",
+    schedule="0 2 * * *",
+    severity="critical",
+    owner="billing-team",
+    runbook_url="https://wiki.example.com/runbooks/nightly-invoice",
+)
+```
+
+`owner` and `runbook_url` are only written to the manifest (as `owner` and `runbookUrl`); they do not change what
+is recorded. Invalid options raise `WorkloadConfigurationError`.
+
 Then provision the alerts from CI with the [`runsignal` CLI](https://github.com/gokhanertogan/RunSignal#cli).
 
 ## Exporting

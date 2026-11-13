@@ -20,7 +20,10 @@ final class ManifestJson {
       o.expectEvery().ifPresent(d -> b.append(",\n      \"expectEverySeconds\": ").append(number(d.toMillis() / 1000.0)));
       o.minProcessed().ifPresent(n -> b.append(",\n      \"minProcessed\": ").append(n));
       o.failureRateThreshold().ifPresent(r -> b.append(",\n      \"failureRateThreshold\": ").append(number(r)));
-      b.append(",\n      \"severity\": ").append(string(o.severity().manifestName())).append("\n    }");
+      b.append(",\n      \"severity\": ").append(string(o.severity().manifestName()));
+      o.owner().ifPresent(v -> b.append(",\n      \"owner\": ").append(string(v)));
+      o.runbookUrl().ifPresent(v -> b.append(",\n      \"runbookUrl\": ").append(string(v)));
+      b.append("\n    }");
     }
     b.append(workloads.isEmpty() ? "]\n}" : "\n  ]\n}");
     return b.toString();

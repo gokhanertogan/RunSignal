@@ -181,10 +181,14 @@ public static class PrometheusRules
             .AppendLine("        labels:")
             .Append("          severity: ").AppendLine(w.Severity.ToString().ToLowerInvariant())
             .Append("          runsignal_alert: ").AppendLine(kind)
-            .Append("          runsignal_workload: ").AppendLine(Yaml(w.Name))
-            .AppendLine("        annotations:")
+            .Append("          runsignal_workload: ").AppendLine(Yaml(w.Name));
+        if (w.Owner is { } owner)
+            yaml.Append("          owner: ").AppendLine(Yaml(owner));
+        yaml.AppendLine("        annotations:")
             .Append("          summary: ").AppendLine(Yaml($"{service}/{w.Name}: {kind}"))
             .Append("          description: ").AppendLine(Yaml(summary));
+        if (w.RunbookUrl is { } runbook)
+            yaml.Append("          runbook_url: ").AppendLine(Yaml(runbook));
     }
 
     // PromQL string literal.

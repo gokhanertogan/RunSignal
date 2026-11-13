@@ -1,5 +1,7 @@
 package io.runsignal;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
@@ -24,6 +26,8 @@ public final class WorkloadOptions {
   private final long minProcessed;
   private final double failureRateThreshold;
   private final Severity severity;
+  private final String owner;
+  private final String runbookUrl;
 
   private WorkloadOptions(Builder b) {
     this.schedule = b.schedule;
@@ -32,6 +36,8 @@ public final class WorkloadOptions {
     this.minProcessed = b.minProcessed;
     this.failureRateThreshold = b.failureRateThreshold;
     this.severity = b.severity;
+    this.owner = b.owner;
+    this.runbookUrl = b.runbookUrl;
   }
 
   public static Builder builder() {
@@ -68,6 +74,16 @@ public final class WorkloadOptions {
     return severity;
   }
 
+  /** Who answers this workload's alerts: a team or person, such as {@code billing-team}. */
+  public Optional<String> owner() {
+    return Optional.ofNullable(owner);
+  }
+
+  /** Absolute http(s) URL of what to do when an alert fires. */
+  public Optional<String> runbookUrl() {
+    return Optional.ofNullable(runbookUrl);
+  }
+
   /** Builds {@link WorkloadOptions}. */
   public static final class Builder {
     private String schedule;
@@ -76,6 +92,8 @@ public final class WorkloadOptions {
     private long minProcessed;
     private double failureRateThreshold;
     private Severity severity = Severity.WARNING;
+    private String owner;
+    private String runbookUrl;
 
     private Builder() {}
 
@@ -125,6 +143,27 @@ public final class WorkloadOptions {
       return this;
     }
 
+    /** Who answers this workload's alerts: a team or person. Not blank, at most 128 characters. */
+    public Builder owner(String owner) {
+      if (owner == null || owner.isBlank()) {
+        throw new IllegalArgumentException("owner must not be blank");
+      }
+      if (owner.length() > MAX_OWNER_LENGTH) {
+        throw new IllegalArgumentException("owner must be at most " + MAX_OWNER_LENGTH + " characters, got " + owner.length());
+      }
+      this.owner = owner;
+      return this;
+    }
+
+    /** Absolute http or https URL of what to do when an alert fires. */
+    public Builder runbookUrl(String runbookUrl) {
+      if (!isHttpUrl(runbookUrl)) {
+        throw new IllegalArgumentException("runbookUrl '" + runbookUrl + "' is not an absolute http or https URL");
+      }
+      this.runbookUrl = runbookUrl;
+      return this;
+    }
+
     public WorkloadOptions build() {
       return new WorkloadOptions(this);
     }
@@ -134,6 +173,23 @@ public final class WorkloadOptions {
         throw new IllegalArgumentException(option + " must be positive");
       }
       return d;
+    }
+  }
+
+  private static final int MAX_OWNER_LENGTH = 128;
+
+  private static boolean isHttpUrl(String value) {
+    if (value == null || value.isBlank() || !value.equals(value.trim())) {
+      return false;
+    }
+    try {
+      URI uri = new URI(value);
+      String scheme = uri.getScheme();
+      return scheme != null
+          && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
+          && uri.getHost() != null && !uri.getHost().isEmpty();
+    } catch (URISyntaxException e) {
+      return false;
     }
   }
 

@@ -42,7 +42,8 @@ schedule:
 
 ```java
 @Scheduled(cron = "0 0 2 * * *")
-@RunSignal(value = "nightly-invoice", maxDuration = "30m", minProcessed = 100, severity = Severity.CRITICAL)
+@RunSignal(value = "nightly-invoice", maxDuration = "30m", minProcessed = 100, severity = Severity.CRITICAL,
+    owner = "billing-team", runbookUrl = "https://wiki.example.com/runbooks/nightly-invoice")
 void generateInvoices() { ... }
 
 @Scheduled(fixedDelay = 60_000)
@@ -64,7 +65,14 @@ runsignal:
       max-duration: 30m
       min-processed: 100
       severity: critical
+      owner: billing-team               # who answers the alerts: a team or person, up to 128 characters
+      runbook-url: https://wiki.example.com/runbooks/invoice-export   # absolute http(s) URL
 ```
+
+`owner` and `runbookUrl` (`runbook-url` in properties) only go into the manifest, where alert tooling adds them to
+every alert's description (and, on Prometheus rules, as the `owner` label and the `runbook_url` annotation). An
+empty `owner` or `runbookUrl` on `@RunSignal` means none. An `owner` that is blank or longer than 128 characters, or a
+`runbookUrl` that is not an absolute `http`/`https` URL, is rejected with `IllegalArgumentException`.
 
 Workloads report their `since_success` (and, with `maxDuration`, `active_run_age`) gauges from startup, so a cron
 job that never fires is still alerted on.
@@ -93,6 +101,8 @@ Workload invoices = registry.workload("nightly-invoice", WorkloadOptions.builder
     .maxDuration("30m")
     .minProcessed(100)
     .severity(Severity.CRITICAL)
+    .owner("billing-team")                                          // optional
+    .runbookUrl("https://wiki.example.com/runbooks/nightly-invoice") // optional
     .build());
 
 invoices.run(() -> {

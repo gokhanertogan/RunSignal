@@ -33,10 +33,14 @@ def test_beat_schedule_tasks_are_registered_before_they_run(harness, app) -> Non
         "cleanup": {"task": "celery.backend_cleanup", "schedule": crontab(hour=4, minute=0)},
     }
 
-    discover_beat_schedule(app, registry=h.registry, workloads={"billing.tasks.generate_invoices": {"severity": "critical"}})
+    discover_beat_schedule(app, registry=h.registry, workloads={
+        "billing.tasks.generate_invoices": {"severity": "critical", "owner": "billing-team",
+                                            "runbook_url": "https://wiki.example.com/invoices"},
+    })
 
     assert h.registry.manifest("billing")["workloads"] == [
-        {"name": "billing.tasks.generate_invoices", "schedule": "0 2 * * *", "severity": "critical"},
+        {"name": "billing.tasks.generate_invoices", "schedule": "0 2 * * *", "severity": "critical",
+         "owner": "billing-team", "runbookUrl": "https://wiki.example.com/invoices"},
         {"name": "billing.tasks.sync_stock", "severity": "warning"},
     ]
 

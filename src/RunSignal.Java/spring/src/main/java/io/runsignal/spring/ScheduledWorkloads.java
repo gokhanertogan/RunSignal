@@ -51,6 +51,8 @@ public final class ScheduledWorkloads {
       if (annotation.minProcessed() > 0) options.minProcessed(annotation.minProcessed());
       if (annotation.failureRateThreshold() > 0) options.failureRateThreshold(annotation.failureRateThreshold());
       options.severity(annotation.severity());
+      if (!annotation.owner().isEmpty()) options.owner(annotation.owner());
+      if (!annotation.runbookUrl().isEmpty()) options.runbookUrl(annotation.runbookUrl());
     }
     String schedule = annotation != null && !annotation.schedule().isEmpty() ? annotation.schedule() : cronOf(method, resolvedCron);
     RunSignalProperties.Workload configured = properties.getWorkloads().get(name);

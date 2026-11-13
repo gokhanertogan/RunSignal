@@ -7,6 +7,10 @@ versions may contain breaking changes.
 ## Unreleased
 
 ### Added
+- Workload `owner` and `runbookUrl`, in every SDK and in the manifest. Every New Relic alert's description names
+  the owner and links the runbook. Prometheus rules get an `owner` label, so Alertmanager can route to the team,
+  and a `runbook_url` annotation. `discover kubernetes` reads `runsignal.io/owner` and `runsignal.io/runbook-url`.
+  `validate` checks them, and `compare` shows owner changes.
 - `runsignal validate`: checks manifests offline for CI. Errors are invalid names, duplicate workloads, and
   unreadable schedules or time zones. Warnings are expectations a backend cannot alert on, naming the backend.
   It exits with 1 on errors, or on warnings too with `--strict`.

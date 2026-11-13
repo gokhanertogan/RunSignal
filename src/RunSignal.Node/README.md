@@ -113,6 +113,32 @@ await discoverSchedulers(queue);   // registers schedulers before they first fir
 defaultRegistry.writeManifestFromEnv('billing-service'); // writes to RUNSIGNAL_MANIFEST_PATH when it is set
 ```
 
+Every place that takes workload options (`workload`, `getOrAdd`, `cronJob`, and the BullMQ `workloads` map) accepts
+these expectations; each one produces an alert:
+
+| Option | Meaning | Alert |
+|---|---|---|
+| `schedule` | Cron expression for when the workload should run | `missed` |
+| `maxDuration` | Longest acceptable run, in milliseconds or as `'30m'` | `overrun` and `hung` |
+| `expectEvery` | Longest acceptable gap between heartbeats | `stalled` |
+| `minProcessed` | Fewest items a run should process | `low-output` |
+| `failureRateThreshold` | Highest acceptable share (0 to 1) of failed runs or items | `failure-rate` |
+| `severity` | `'info'`, `'warning'` (default) or `'critical'` | Routing |
+| `owner` | Who answers the alerts: a team or person, such as `'billing-team'` (at most 128 characters) | Added to alert descriptions, and as the `owner` label on Prometheus rules |
+| `runbookUrl` | Absolute `http`/`https` URL of what to do when an alert fires | Added to alert descriptions, and as the `runbook_url` annotation on Prometheus rules |
+
+```ts
+defaultRegistry.workload('nightly-invoice', {
+  schedule: '0 2 * * *',
+  severity: 'critical',
+  owner: 'billing-team',
+  runbookUrl: 'https://wiki.example.com/runbooks/nightly-invoice',
+});
+```
+
+`owner` and `runbookUrl` are only written to the manifest; they do not change what is recorded. Invalid options
+throw `WorkloadConfigurationError`.
+
 ## Exporting
 
 **New Relic** needs delta temporality. With cumulative, a stopped workload never looks stopped:

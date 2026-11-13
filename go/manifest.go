@@ -1,6 +1,7 @@
 package runsignal
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ type ManifestEntry struct {
 	MinProcessed         *int64   `json:"minProcessed,omitempty"`
 	FailureRateThreshold *float64 `json:"failureRateThreshold,omitempty"`
 	Severity             Severity `json:"severity"`
+	Owner                string   `json:"owner,omitempty"`
+	RunbookURL           string   `json:"runbookUrl,omitempty"`
 }
 
 // Manifest describes every workload created so far. service must match the OpenTelemetry service.name the
@@ -33,7 +36,8 @@ func (r *Registry) Manifest(service string) Manifest {
 	m := Manifest{Version: 1, Service: service, Workloads: []ManifestEntry{}}
 	for _, w := range r.Workloads() {
 		e := w.expectations
-		entry := ManifestEntry{Name: w.name, Schedule: e.Schedule, Severity: e.Severity}
+		entry := ManifestEntry{Name: w.name, Schedule: e.Schedule, Severity: e.Severity,
+			Owner: e.Owner, RunbookURL: e.RunbookURL}
 		if e.MaxDuration > 0 {
 			entry.MaxDurationSeconds = ptr(e.MaxDuration.Seconds())
 		}
@@ -54,10 +58,15 @@ func (r *Registry) Manifest(service string) Manifest {
 // WriteManifest writes the manifest to path as indented JSON. It writes a temporary file and renames it into
 // place, so a reader never sees half a manifest.
 func (r *Registry) WriteManifest(path, service string) error {
-	data, err := json.MarshalIndent(r.Manifest(service), "", "  ")
-	if err != nil {
+	// Characters such as & in a runbook URL are written as they are, not as \u0026, as the other SDKs write them.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(r.Manifest(service)); err != nil {
 		return err
 	}
+	data := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
