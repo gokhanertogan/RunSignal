@@ -13,7 +13,7 @@
     {
       "name": "nightly-invoice",
       "schedule": "0 2 * * *",
-      "maxDurationSeconds": 1800,
+      "maxDurationSeconds": 2700,
       "minProcessed": 100,
       "severity": "critical"
     },
