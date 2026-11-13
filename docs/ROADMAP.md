@@ -121,6 +121,7 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
   - Thresholds come from the shared `RunSignal.Alerting` package, so they match New Relic.
   - Verified against a local Prometheus 3.15 with its OTLP receiver: the metric names were taken from real OTLP ingestion, all rules evaluated healthy, `RunSignalFailed` fired on live failures, and `RunSignalNotReporting` fired when the process stopped.
   - `promtool test rules` covers every rule, including the first failure of a job, which `increase()` alone misses because the counter series is created by that failure.
+- **Grafana-managed alerts** ✅: `runsignal export grafana-alerts` writes the Prometheus rules as a Grafana alerting provisioning file. The PromQL is the same, each rule is a query plus an "any series" threshold, and uids are stable. Verified by provisioning it into Grafana against a local Prometheus.
 - **Grafana dashboard** ✅: `runsignal export grafana` writes a dashboard from the same metrics as the rules, with data source, service and workload variables and a panel of firing RunSignal alerts. Its queries are checked with `promtool`.
 - **Datadog monitors**: next. It needs a Datadog account to verify against.
 

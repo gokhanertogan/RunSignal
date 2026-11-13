@@ -454,6 +454,7 @@ ruler:
 ```bash
 runsignal export prometheus billing.json payments.json -o runsignal-rules.yml
 runsignal export grafana billing.json payments.json -o runsignal-dashboard.json
+runsignal export grafana-alerts billing.json payments.json --datasource-uid <prometheus-uid> -o runsignal-alerts.yaml
 ```
 
 `export grafana` (since 0.2.0) writes a dashboard to import or provision in Grafana: runs by outcome, firing RunSignal
@@ -461,6 +462,13 @@ alerts, p95 duration, time since each workload's last success and heartbeat, ite
 oldest unfinished run. It has data source, service and workload variables; without manifests it shows every service
 that reports. Pass the manifests of per-run workloads (`runsignal exec`, `discover kubernetes`): their runs are
 summed per run instead of with `increase()`, as the alert rules do, and their last success comes from successful runs.
+
+**Grafana-managed alerts.** Use `export grafana-alerts` with Grafana Cloud, or with any Grafana that has no
+Prometheus ruler:
+- **What it writes:** the same rules as Grafana alert rules, with the same PromQL and thresholds as `export prometheus`.
+- **Format:** a provisioning file with one rule group per service, in a `RunSignal` folder (change it with `--folder`).
+- **Loading it:** put it in Grafana's `provisioning/alerting` directory, or load it through Grafana's provisioning API.
+- **Updates:** rule uids are stable, so provisioning again updates the rules.
 
 - **Routing:** Alertmanager routes on the `severity` and `runsignal_alert` labels.
 - **Metric names:** the rules use the names Prometheus gives OTLP metrics by default (`runsignal_workload_runs_total`; `job` is `service.name`).
@@ -480,6 +488,7 @@ summed per run instead of with `increase()`, as the alert rules do, and their la
 | `destroy --service <name> --account-id <id> [--dry-run]` | Removes what RunSignal created for a service. |
 | `export prometheus <manifests> [-o rules.yml]` | Writes Prometheus alerting rules. |
 | `export grafana [manifests] [-o dashboard.json]` | Writes a Grafana dashboard for the Prometheus metrics. |
+| `export grafana-alerts <manifests> --datasource-uid <uid> [-o alerts.yaml]` | Writes Grafana-managed alert rules (a provisioning file) with the same PromQL as the Prometheus rules. |
 | `exec --workload <name> [--service <name>] -- <command>` | Runs a command as one run of a workload and exports it over OTLP. |
 | `discover kubernetes --service <name> [-n <ns> \| -A] [--input <file>] [-o manifest.json]` | Writes a manifest of per-run workloads from Kubernetes CronJobs. |
 

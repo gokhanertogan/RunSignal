@@ -7,6 +7,9 @@ versions may contain breaking changes.
 ## Unreleased
 
 ### Added
+- `runsignal export grafana-alerts`: the alert rules as a Grafana alerting provisioning file, for Grafana-managed
+  alerting (Grafana Cloud, or Grafana without a Prometheus ruler). The PromQL and thresholds are the same as
+  `export prometheus`, and the uids are stable.
 - Workload `owner` and `runbookUrl`, in every SDK and in the manifest. Every New Relic alert's description names
   the owner and links the runbook. Prometheus rules get an `owner` label, so Alertmanager can route to the team,
   and a `runbook_url` annotation. `discover kubernetes` reads `runsignal.io/owner` and `runsignal.io/runbook-url`.

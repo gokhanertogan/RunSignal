@@ -4,6 +4,16 @@ using RunSignal.Alerting;
 
 namespace RunSignal.Prometheus;
 
+/// <summary>One RunSignal alerting rule in PromQL, before it is written for a particular ruler.</summary>
+/// <param name="Service">The service the workload belongs to.</param>
+/// <param name="Workload">The workload and its expectations.</param>
+/// <param name="Alert">The alert name, such as <c>RunSignalMissed</c>.</param>
+/// <param name="Kind">The alert kind, such as <c>missed</c>; the <c>runsignal_alert</c> label.</param>
+/// <param name="Expr">The PromQL expression. It returns a series while the alert condition holds, and nothing otherwise.</param>
+/// <param name="For">How long the condition must hold before the alert fires, such as <c>1m</c>.</param>
+/// <param name="Description">What the alert means, for its description annotation.</param>
+public sealed record AlertRule(string Service, WorkloadManifestEntry Workload, string Alert, string Kind, string Expr, string For, string Description);
+
 /// <summary>
 /// Turns workload manifests into a Prometheus alerting rules file. Metric and label names are the ones Prometheus
 /// gives OpenTelemetry metrics received over OTLP with its default translation: dots become underscores, units
@@ -31,20 +41,39 @@ public static class PrometheusRules
 
         foreach (var manifest in manifests)
         {
-            yaml.Append("  - name: ").AppendLine(Yaml($"runsignal-{manifest.Service}"))
-                .AppendLine("    rules:");
-            var before = yaml.Length;
-            foreach (var workload in manifest.Workloads)
-                AddRules(yaml, manifest.Service, workload, options, notes);
-            if (yaml.Length == before)
-                yaml.Length -= "    rules:".Length + Environment.NewLine.Length;
+            yaml.Append("  - name: ").AppendLine(Yaml($"runsignal-{manifest.Service}"));
+            var rules = Rules([manifest], options, out var found);
+            notes.AddRange(found);
+            if (rules.Count == 0)
+                continue;
+            yaml.AppendLine("    rules:");
+            foreach (var rule in rules)
+                Append(yaml, rule);
         }
-
         warnings = notes;
         return yaml.ToString();
     }
 
-    private static void AddRules(StringBuilder yaml, string service, WorkloadManifestEntry w, AlertOptions options, List<string> warnings)
+    /// <summary>
+    /// The alerting rules for the manifests, for any Prometheus-compatible ruler or Grafana-managed alerting.
+    /// <paramref name="warnings"/> lists expectations that produced no rule, and why.
+    /// </summary>
+    public static IReadOnlyList<AlertRule> Rules(IEnumerable<WorkloadManifest> manifests, AlertOptions options, out IReadOnlyList<string> warnings)
+    {
+        ArgumentNullException.ThrowIfNull(manifests);
+        ArgumentNullException.ThrowIfNull(options);
+        var rules = new List<AlertRule>();
+        var notes = new List<string>();
+        foreach (var manifest in manifests)
+        {
+            foreach (var workload in manifest.Workloads)
+                AddRules(rules, manifest.Service, workload, options, notes);
+        }
+        warnings = notes;
+        return rules;
+    }
+
+    private static void AddRules(List<AlertRule> rules, string service, WorkloadManifestEntry w, AlertOptions options, List<string> warnings)
     {
         var selector = $"job={Label(service)}, runsignal_workload={Label(w.Name)}";
         var notReporting = $"{(int)options.NotReportingAfter.TotalMinutes}m";
@@ -59,7 +88,7 @@ public static class PrometheusRules
             : $"{By} (increase({series}[{window}]))";
         void Rule(string alert, string kind, string expr, string forDuration, string summary)
         {
-            Append(yaml, alert, kind, expr, forDuration, w, service, summary);
+            rules.Add(new AlertRule(service, w, alert, kind, expr, forDuration, summary));
             count++;
         }
 
@@ -173,8 +202,9 @@ public static class PrometheusRules
     private static string Increased(string series, string window) =>
         $"{By} (increase({series}[{window}])) > 0 or {By} ({series} unless {series} offset {window}) > 0";
 
-    private static void Append(StringBuilder yaml, string alert, string kind, string expr, string forDuration, WorkloadManifestEntry w, string service, string summary)
+    private static void Append(StringBuilder yaml, AlertRule rule)
     {
+        var (service, w, alert, kind, expr, forDuration, summary) = rule;
         yaml.Append("      - alert: ").AppendLine(alert)
             .Append("        expr: ").AppendLine(Yaml(expr))
             .Append("        for: ").AppendLine(forDuration)
