@@ -407,7 +407,7 @@ Every alert kind has fired on a live New Relic account, and every Prometheus rul
 2. **Provision.** `runsignal provision` creates the following, and running it again changes only what changed:
    - One policy per service and severity (`RunSignal: billing-service (critical)`) with its NRQL conditions.
    - A workflow per policy, routing incidents to the notification channels you pass with `--channel critical=<channel-id>`. Create the Teams or Slack destination and channel in New Relic first; Slack destinations can only be created in the UI.
-   - A dashboard, `RunSignal: billing-service`, showing runs by outcome, time since each workload's last success and heartbeat, p95 duration, items processed, and failures by error type.
+   - A dashboard, `RunSignal: billing-service`, showing runs by outcome, each workload's last success and time since its heartbeat, p95 duration, items processed, failures by error type, and the oldest unfinished run (what `hung` alerts on).
 3. **Ownership.** RunSignal changes and deletes only what it created. Conditions added by hand, and the
    policies that hold them, are kept. Notification channels are never deleted.
 
@@ -428,8 +428,10 @@ runsignal export grafana billing.json payments.json -o runsignal-dashboard.json
 ```
 
 `export grafana` (since 0.2.0) writes a dashboard to import or provision in Grafana: runs by outcome, firing RunSignal
-alerts, p95 duration, time since each workload's last success and heartbeat, items, and failures by error type.
-It has data source, service and workload variables; without manifests it shows every service that reports.
+alerts, p95 duration, time since each workload's last success and heartbeat, items, failures by error type, and the
+oldest unfinished run. It has data source, service and workload variables; without manifests it shows every service
+that reports. Pass the manifests of per-run workloads (`runsignal exec`, `discover kubernetes`): their runs are
+summed per run instead of with `increase()`, as the alert rules do, and their last success comes from successful runs.
 
 - **Routing:** Alertmanager routes on the `severity` and `runsignal_alert` labels.
 - **Metric names:** the rules use the names Prometheus gives OTLP metrics by default (`runsignal_workload_runs_total`; `job` is `service.name`).
