@@ -1,0 +1,30 @@
+name: Alert review
+
+# Dogfoods the action's pull request comment on the sample manifest, with the CLI built from this commit (the
+# released CLI may not have the latest commands yet). Pull requests from forks get a read-only token and no comment.
+
+on:
+  pull_request:
+    paths:
+      - samples/manifests/**
+      - action.yml
+      - src/RunSignal.Cli/**
+      - .github/workflows/alert-review.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet publish src/RunSignal.Cli -c Release -o "$RUNNER_TEMP/runsignal"
+      - uses: ./
+        with:
+          cli-path: ${{ runner.temp }}/runsignal/RunSignal.Cli
+          pr-comment: samples/manifests/billing.json
