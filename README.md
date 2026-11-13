@@ -372,18 +372,19 @@ Suspended CronJobs are skipped. Annotations set the rest:
 Provision alerts on every deploy with the bundled action:
 
 ```yaml
-- uses: gokhanertogan/RunSignal@main
+- uses: gokhanertogan/RunSignal@v0
   with:
     command: provision runsignal.json --account-id 1234567 --region EU
     new-relic-api-key: ${{ secrets.NEW_RELIC_API_KEY }}
 
 # or, for Prometheus and Grafana:
-- uses: gokhanertogan/RunSignal@main
+- uses: gokhanertogan/RunSignal@v0
   with:
     command: export prometheus runsignal.json -o deploy/runsignal-rules.yml
 ```
 
-The action installs the `runsignal` CLI and runs `command`; any CLI command works.
+The action installs the `runsignal` CLI and runs `command`; any CLI command works. `@v0` follows the latest 0.x
+release; pin a release such as `@v0.4.0` to stay on one version.
 
 **Review alert changes on pull requests.** With `pr-comment`, the action comments on the pull request:
 - the alerts the change adds, removes or changes, compared with the base branch, in reader terms such as "a run
@@ -402,7 +403,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: gokhanertogan/RunSignal@main
+      - uses: gokhanertogan/RunSignal@v0
         with:
           pr-comment: runsignal.json      # manifests, separated by spaces
 ```

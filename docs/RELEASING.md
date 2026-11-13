@@ -17,7 +17,7 @@ Every package is released together, with the same version, by
 The workflow refuses to publish if any package's version differs from the tag, or the changelog has no
 section for it. It then:
 - publishes to NuGet, npm, crates.io and Maven Central;
-- tags the Go module as `go/vX.Y.Z`;
+- tags the Go module as `go/vX.Y.Z`, and moves the action's major version tag (`v0`) to the release;
 - creates a GitHub release with that version's changelog and the NuGet packages.
 
 Each registry job can be re-run on its own. Pushes that already happened are skipped on NuGet; npm,
