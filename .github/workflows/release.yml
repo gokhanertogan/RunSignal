@@ -237,3 +237,11 @@ jobs:
           gh release create "$GITHUB_REF_NAME" artifacts/* --title "RunSignal $version" --notes-file notes.md
         env:
           GH_TOKEN: ${{ github.token }}
+      # Workflows use the action as gokhanertogan/RunSignal@v0 (the major version), so that tag follows every release.
+      # It does not match the release trigger, so moving it publishes nothing.
+      - name: Move the major version tag
+        run: |
+          major="v${GITHUB_REF_NAME#v}"
+          major="${major%%.*}"
+          git tag --force "$major" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$major"
