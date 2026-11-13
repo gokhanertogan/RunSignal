@@ -7,6 +7,14 @@ versions may contain breaking changes.
 ## Unreleased
 
 ### Added
+- `runsignal validate`: checks manifests offline for CI. Errors are invalid names, duplicate workloads, and
+  unreadable schedules or time zones. Warnings are expectations a backend cannot alert on, naming the backend.
+  It exits with 1 on errors, or on warnings too with `--strict`.
+- `runsignal compare`: the alerts a manifest change adds, removes or changes, offline, in reader terms such as
+  "a run takes longer than 30m" → "45m". `--markdown` writes it for a pull request comment.
+- GitHub Action: `pr-comment` comments on pull requests with the alert changes against the base branch and the
+  validation findings, updates the same comment on every push, and fails when a manifest has errors. `command` is
+  now optional, and `cli-path` uses an existing `runsignal` instead of installing one.
 - Dashboards: a panel or widget for the oldest unfinished run (`active_run_age`, what `hung` alerts on) on the
   Grafana and New Relic dashboards. The New Relic workload table shows each workload's last success as a date.
 

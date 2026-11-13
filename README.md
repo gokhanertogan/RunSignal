@@ -381,6 +381,31 @@ Provision alerts on every deploy with the bundled action:
 
 The action installs the `runsignal` CLI and runs `command`; any CLI command works.
 
+**Review alert changes on pull requests.** With `pr-comment`, the action comments on the pull request:
+- the alerts the change adds, removes or changes, compared with the base branch, in reader terms such as "a run
+  takes longer than 30m → 45m" or "warning → critical";
+- the validation findings.
+
+It updates the same comment on every push, and the step fails when a manifest has errors:
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: gokhanertogan/RunSignal@main
+        with:
+          pr-comment: runsignal.json      # manifests, separated by spaces
+```
+
+The comparison is made on the New Relic conditions, offline. Prometheus rules follow the same expectations. Pull
+requests from forks get a read-only token, so they get no comment.
+
 ## Alerts
 
 | Alert | Fires when | New Relic | Prometheus |
@@ -444,6 +469,8 @@ summed per run instead of with `increase()`, as the alert rules do, and their la
 | Command | What it does |
 |---|---|
 | `plan <manifests>` | Shows the alert conditions, offline. |
+| `validate <manifests> [--strict]` | Checks manifests offline. Exits with 1 on errors (invalid names, duplicate workloads, unreadable schedules or time zones), or on warnings too with `--strict` (expectations a backend cannot alert on). |
+| `compare <manifests> --base <old-manifest> [--markdown]` | Shows the alerts a manifest change adds, removes or changes, offline. |
 | `diff <manifests> --account-id <id> [--region EU]` | Shows what `provision` would change in New Relic. |
 | `provision <manifests> --account-id <id> [--channel critical=<id>] [--no-dashboard]` | Creates and updates policies, conditions, workflows and the dashboard. |
 | `destroy --service <name> --account-id <id> [--dry-run]` | Removes what RunSignal created for a service. |

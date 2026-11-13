@@ -67,6 +67,60 @@ internal static class RunSignalCli
             return 0;
         }));
 
+        var strict = new Option<bool>("--strict") { Description = "Fail on warnings too, not only on errors." };
+        var markdown = new Option<bool>("--markdown") { Description = "Write Markdown, for a pull request comment." };
+        var validate = new Command("validate", "Check manifests offline: invalid names, duplicate workloads, unreadable schedules and time zones (errors), and expectations a backend cannot alert on (warnings). Exits with 1 on errors.")
+        {
+            manifests, strict, markdown, grace, notReporting, timeZone,
+        };
+        validate.SetAction(Guarded(async (result, ct) =>
+        {
+            var (loaded, findings) = await LoadForReviewAsync(result.GetValue(manifests)!, ct).ConfigureAwait(false);
+            findings.AddRange(ManifestReview.Validate(loaded, PlanOptions(result, grace, notReporting, timeZone)));
+            if (result.GetValue(markdown))
+            {
+                await output.WriteAsync(ManifestReview.FindingsMarkdown(findings)).ConfigureAwait(false);
+            }
+            else
+            {
+                foreach (var f in findings.OrderBy(f => !f.IsError))
+                    await output.WriteLineAsync($"{(f.IsError ? "error" : "warning")}: {f.Source}: {f.Message}").ConfigureAwait(false);
+                var errors = findings.Count(f => f.IsError);
+                var warnings = findings.Count - errors;
+                await output.WriteLineAsync(findings.Count == 0 ? "Manifests are valid." : $"{errors} {(errors == 1 ? "error" : "errors")}, {warnings} {(warnings == 1 ? "warning" : "warnings")}.").ConfigureAwait(false);
+            }
+            return findings.Any(f => f.IsError || result.GetValue(strict)) ? 1 : 0;
+        }));
+
+        var bases = new Option<FileInfo[]>("--base")
+        {
+            Description = "A manifest as it was before, such as from the pull request's base branch. Repeatable; a service with no base manifest is new.",
+        };
+        var compare = new Command("compare", "Show the alerts that change between --base manifests and these manifests, offline: added, removed and changed alerts per workload. With --markdown, also the validation findings, for a pull request comment.")
+        {
+            manifests, bases, markdown, grace, notReporting, timeZone,
+        };
+        compare.SetAction(Guarded(async (result, ct) =>
+        {
+            var options = PlanOptions(result, grace, notReporting, timeZone);
+            var (after, findings) = await LoadForReviewAsync(result.GetValue(manifests)!, ct).ConfigureAwait(false);
+            var (before, _) = await LoadForReviewAsync(result.GetValue(bases) ?? [], ct).ConfigureAwait(false);
+            var changes = ManifestReview.Compare(before.Select(m => m.Manifest), after.Select(m => m.Manifest), options);
+            if (result.GetValue(markdown))
+            {
+                findings.AddRange(ManifestReview.Validate(after, options));
+                await output.WriteAsync(ManifestReview.Markdown(changes, findings)).ConfigureAwait(false);
+                return 0;
+            }
+            foreach (var c in changes)
+            {
+                var detail = c.Change switch { "added" => c.After, "removed" => c.Before, _ => $"{c.Before} -> {c.After}" };
+                await output.WriteLineAsync($"{(c.Change == "added" ? '+' : c.Change == "removed" ? '-' : '~')} {c.Service} {c.Workload}: {c.Alert} ({detail})").ConfigureAwait(false);
+            }
+            await output.WriteLineAsync(changes.Count == 0 ? "No alert changes." : $"{changes.Count} alert {(changes.Count == 1 ? "change" : "changes")}.").ConfigureAwait(false);
+            return 0;
+        }));
+
         var diff = new Command("diff", "Show what provision would change in New Relic, without changing anything.")
         {
             manifests, accountId, region, apiKey, channels, noDashboard, grace, notReporting, timeZone,
@@ -179,7 +233,7 @@ internal static class RunSignalCli
 
         var export = new Command("export", "Write alert rules and dashboards for backends RunSignal does not provision directly.") { prometheus, grafana };
 
-        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, diff, provision, destroy, export, ExecCommand.Create(error, configureExecMetrics), DiscoverCommand.Create(output, error, Guarded) };
+        var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, validate, compare, diff, provision, destroy, export, ExecCommand.Create(error, configureExecMetrics), DiscoverCommand.Create(output, error, Guarded) };
         return await root.Parse(args).InvokeAsync().ConfigureAwait(false);
 
         // Expected failures (a missing file, a bad cron, an API error) print one line instead of a stack trace.
@@ -229,6 +283,33 @@ internal static class RunSignalCli
             await output.WriteLineAsync(changed == 0 ? "No changes." : $"{changed} {(changed == 1 ? "resource" : "resources")} {verb}.").ConfigureAwait(false);
             return 0;
         }
+    }
+
+    private static AlertPlanOptions PlanOptions(ParseResult result, Option<double> grace, Option<double> notReporting, Option<string> timeZone) => new()
+    {
+        MissedGrace = TimeSpan.FromMinutes(result.GetValue(grace)),
+        NotReportingAfter = TimeSpan.FromMinutes(result.GetValue(notReporting)),
+        ScheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(result.GetValue(timeZone)!),
+    };
+
+    // A manifest that cannot be read is a finding, not a crash, so one bad file does not hide the others' results.
+    private static async Task<(List<(string Source, WorkloadManifest Manifest)> Loaded, List<Finding> Findings)> LoadForReviewAsync(FileInfo[] files, CancellationToken ct)
+    {
+        var loaded = new List<(string, WorkloadManifest)>();
+        var findings = new List<Finding>();
+        foreach (var file in files)
+        {
+            var source = Path.GetRelativePath(Environment.CurrentDirectory, file.FullName);
+            try
+            {
+                loaded.Add((source, WorkloadManifest.FromJson(await File.ReadAllTextAsync(file.FullName, ct).ConfigureAwait(false))));
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException)
+            {
+                findings.Add(new Finding(true, source, "cannot be read: " + ex.Message));
+            }
+        }
+        return (loaded, findings);
     }
 
     private static async Task<List<AlertPlan>> LoadPlansAsync(

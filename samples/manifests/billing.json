@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "service": "billing",
+  "workloads": [
+    {
+      "name": "bank-statement-import",
+      "schedule": "*/15 6-20 * * 1-5",
+      "maxDurationSeconds": 600,
+      "failureRateThreshold": 0.2,
+      "severity": "warning",
+      "timeZone": "Europe/Istanbul"
+    },
+    {
+      "name": "nightly-invoice",
+      "schedule": "0 2 * * *",
+      "maxDurationSeconds": 2700,
+      "minProcessed": 100,
+      "severity": "critical"
+    },
+    {
+      "name": "stock-sync",
+      "expectEverySeconds": 300,
+      "failureRateThreshold": 0.2,
+      "severity": "warning"
+    }
+  ]
+}
