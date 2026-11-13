@@ -231,7 +231,48 @@ internal static class RunSignalCli
             return 0;
         }));
 
-        var export = new Command("export", "Write alert rules and dashboards for backends RunSignal does not provision directly.") { prometheus, grafana };
+        var datasourceUid = new Option<string>("--datasource-uid")
+        {
+            Description = "The uid of the Grafana Prometheus data source that receives RunSignal's metrics.",
+            Required = true,
+        };
+        var folder = new Option<string>("--folder")
+        {
+            Description = "The Grafana folder for the alert rules.",
+            DefaultValueFactory = _ => "RunSignal",
+        };
+        var grafanaAlerts = new Command("grafana-alerts", "Write Grafana-managed alert rules (a Grafana alerting provisioning file) for the manifests, with the same PromQL and thresholds as export prometheus. For Grafana Cloud, or Grafana without a Prometheus ruler.")
+        {
+            manifests, datasourceUid, folder, outputFile, grace, notReporting, timeZone,
+        };
+        grafanaAlerts.SetAction(Guarded(async (result, ct) =>
+        {
+            var options = new RunSignal.Alerting.AlertOptions
+            {
+                MissedGrace = TimeSpan.FromMinutes(result.GetValue(grace)),
+                NotReportingAfter = TimeSpan.FromMinutes(result.GetValue(notReporting)),
+                ScheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(result.GetValue(timeZone)!),
+            };
+            var loaded = new List<WorkloadManifest>();
+            foreach (var manifestFile in result.GetValue(manifests)!)
+                loaded.Add(WorkloadManifest.FromJson(await File.ReadAllTextAsync(manifestFile.FullName, ct).ConfigureAwait(false)));
+
+            var rules = RunSignal.Prometheus.GrafanaAlerting.Generate(loaded, options, result.GetValue(datasourceUid)!, result.GetValue(folder)!, out var warnings);
+            foreach (var warning in warnings)
+                await error.WriteLineAsync("warning: " + warning).ConfigureAwait(false);
+            if (result.GetValue(outputFile) is { } file)
+            {
+                await File.WriteAllTextAsync(file.FullName, rules, ct).ConfigureAwait(false);
+                await output.WriteLineAsync($"Wrote Grafana alert rules for {loaded.Sum(m => m.Workloads.Count)} workloads to {file.FullName}.").ConfigureAwait(false);
+            }
+            else
+            {
+                await output.WriteAsync(rules).ConfigureAwait(false);
+            }
+            return 0;
+        }));
+
+        var export = new Command("export", "Write alert rules and dashboards for backends RunSignal does not provision directly.") { prometheus, grafana, grafanaAlerts };
 
         var root = new RootCommand("RunSignal: alerts for background work that no HTTP status code describes.") { plan, validate, compare, diff, provision, destroy, export, ExecCommand.Create(error, configureExecMetrics), DiscoverCommand.Create(output, error, Guarded) };
         return await root.Parse(args).InvokeAsync().ConfigureAwait(false);
