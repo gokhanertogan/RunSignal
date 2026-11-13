@@ -198,6 +198,10 @@ public static class AlertPlanner
                 });
             }
 
+            var contact = Contact(workload);
+            for (var i = before; i < conditions.Count && contact.Length > 0; i++)
+                conditions[i] = conditions[i] with { Description = conditions[i].Description + contact };
+
             if (conditions.Count == before && !warnings.Any(w => w.StartsWith(workload.Name + ":", StringComparison.Ordinal)))
                 warnings.Add($"{workload.Name}: no alerts, because it has no expectations. Set a schedule, expectEvery, maxDuration, minProcessed or failureRateThreshold.");
         }
@@ -211,6 +215,10 @@ public static class AlertPlanner
     /// <summary>The name of the policy RunSignal manages for a service and severity, such as <c>RunSignal: billing (critical)</c>.</summary>
     public static string PolicyName(string service, Severity severity) =>
         $"RunSignal: {service} ({severity.ToString().ToLowerInvariant()})";
+
+    // Appended to every condition's description, so the incident says who to call and what to do.
+    private static string Contact(WorkloadManifestEntry workload) =>
+        (workload.Owner is { } owner ? $" Owner: {owner}." : "") + (workload.RunbookUrl is { } runbook ? $" Runbook: {runbook}" : "");
 
     // NRQL string literal. Workload names cannot contain quotes, but service names can.
     private static string Quote(string value) => "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";

@@ -11,6 +11,7 @@ import time
 import weakref
 from datetime import timedelta
 from typing import Any, Callable, Iterable, Literal, TypeVar, Union
+from urllib.parse import urlsplit
 
 from opentelemetry import context, metrics, trace
 from opentelemetry.metrics import CallbackOptions, MeterProvider, Observation
@@ -54,11 +55,23 @@ def _to_seconds(value: Duration, option: str) -> float:
     return seconds
 
 
+def _is_http_url(value: object) -> bool:
+    # The scheme is matched case-sensitively, as spec/manifest.schema.json does, and whitespace is rejected.
+    if not isinstance(value, str) or not re.fullmatch(r"https?://\S+", value):
+        return False
+    try:
+        return bool(urlsplit(value).hostname)
+    except ValueError:
+        return False
+
+
 class Expectations:
     """The validated expectations of a workload, with durations in seconds. They define the alerts RunSignal
     provisions and do not change how signals are recorded."""
 
-    __slots__ = ("schedule", "max_duration", "expect_every", "min_processed", "failure_rate_threshold", "severity")
+    __slots__ = (
+        "schedule", "max_duration", "expect_every", "min_processed", "failure_rate_threshold", "severity", "owner", "runbook_url"
+    )
 
     def __init__(
         self,
@@ -68,7 +81,13 @@ class Expectations:
         min_processed: int | None = None,
         failure_rate_threshold: float | None = None,
         severity: Severity | None = None,
+        owner: str | None = None,
+        runbook_url: str | None = None,
     ) -> None:
+        if owner is not None and (not isinstance(owner, str) or not owner.strip() or len(owner) > 128):
+            raise WorkloadConfigurationError("owner must be a non-blank string of at most 128 characters.")
+        if runbook_url is not None and not _is_http_url(runbook_url):
+            raise WorkloadConfigurationError(f"runbook_url '{runbook_url}' must be an absolute http or https URL.")
         if failure_rate_threshold is not None and not 0 <= failure_rate_threshold <= 1:
             raise WorkloadConfigurationError(f"failure_rate_threshold must be between 0 and 1, got {failure_rate_threshold}.")
         if min_processed is not None and (not isinstance(min_processed, int) or isinstance(min_processed, bool) or min_processed < 0):
@@ -82,6 +101,8 @@ class Expectations:
         self.min_processed = min_processed
         self.failure_rate_threshold = failure_rate_threshold
         self.severity: Severity = severity
+        self.owner = owner
+        self.runbook_url = runbook_url
 
 
 class _Instruments:
@@ -195,12 +216,15 @@ class WorkloadRegistry:
         min_processed: int | None = None,
         failure_rate_threshold: float | None = None,
         severity: Severity | None = None,
+        owner: str | None = None,
+        runbook_url: str | None = None,
     ) -> Workload:
         """Returns the workload called ``name``, creating it with the given expectations on first use. Call it once
         and keep the result. Passing expectations for a workload that already exists raises, so expectations are
         declared in exactly one place."""
         options = dict(schedule=schedule, max_duration=max_duration, expect_every=expect_every, min_processed=min_processed,
-                       failure_rate_threshold=failure_rate_threshold, severity=severity)
+                       failure_rate_threshold=failure_rate_threshold, severity=severity, owner=owner,
+                       runbook_url=runbook_url)
         has_options = any(v is not None for v in options.values())
         with self._lock:
             existing = self._workloads.get(name)
@@ -257,6 +281,10 @@ class WorkloadRegistry:
             if e.failure_rate_threshold:
                 entry["failureRateThreshold"] = _number(e.failure_rate_threshold)
             entry["severity"] = e.severity
+            if e.owner is not None:
+                entry["owner"] = e.owner
+            if e.runbook_url is not None:
+                entry["runbookUrl"] = e.runbook_url
             entries.append(entry)
         return {"version": 1, "service": service, "workloads": entries}
 
@@ -544,6 +572,6 @@ default_registry = WorkloadRegistry()
 def monitor(name: str, **options: Any) -> Callable[[F], F]:
     """Decorates a function, sync or async, so every call is a run of the workload ``name`` in the default
     registry, declared with ``options`` (``schedule``, ``max_duration``, ``expect_every``, ``min_processed``,
-    ``failure_rate_threshold``, ``severity``)."""
+    ``failure_rate_threshold``, ``severity``, ``owner``, ``runbook_url``)."""
     return default_registry.monitor(name, **options)
 

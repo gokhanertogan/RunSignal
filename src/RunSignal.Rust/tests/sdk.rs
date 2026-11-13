@@ -279,6 +279,41 @@ fn registry_validates_names_and_keeps_options_in_one_place() {
     assert!(registry
         .workload("rate", Options::new().failure_rate_threshold(1.5))
         .is_err());
+    for owner in [String::new(), "   ".into(), "a".repeat(129)] {
+        assert!(
+            registry
+                .workload("owned", Options::new().owner(owner.clone()))
+                .is_err(),
+            "{owner:?}"
+        );
+    }
+    assert!(registry
+        .workload("owned-max", Options::new().owner("ş".repeat(128)))
+        .is_ok());
+    for url in [
+        "",
+        "runbooks/sync",
+        "/runbooks/sync",
+        "ftp://wiki/sync",
+        "mailto:ops@example.com",
+        "https://",
+        "https://:8080/sync",
+        "HTTPS://wiki/sync",
+        "https://wiki/has space",
+    ] {
+        assert!(
+            registry
+                .workload("runbook", Options::new().runbook_url(url))
+                .is_err(),
+            "{url:?}"
+        );
+    }
+    assert!(registry
+        .workload(
+            "runbook-ok",
+            Options::new().runbook_url("http://wiki.local:8080/runbooks/sync")
+        )
+        .is_ok());
 
     registry
         .workload("sync", Options::new().severity(Severity::Critical))
@@ -340,6 +375,8 @@ fn manifest_is_byte_for_byte_the_same_as_the_other_sdks() {
         .workload(
             "nightly-invoice",
             Options::new()
+                .runbook_url("https://wiki.example.com/runbooks/invoice?a=1&b=2")
+                .owner("billing-team")
                 .schedule("0 2 * * *")
                 .max_duration(Duration::from_secs(1800))
                 .min_processed(100)
@@ -362,7 +399,9 @@ fn manifest_is_byte_for_byte_the_same_as_the_other_sdks() {
       "schedule": "0 2 * * *",
       "maxDurationSeconds": 1800,
       "minProcessed": 100,
-      "severity": "critical"
+      "severity": "critical",
+      "owner": "billing-team",
+      "runbookUrl": "https://wiki.example.com/runbooks/invoice?a=1&b=2"
     },
     {
       "name": "stock-sync",

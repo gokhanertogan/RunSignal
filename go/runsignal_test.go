@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,23 @@ func TestRegistryValidatesNamesAndOptions(t *testing.T) {
 	if _, err := r.Workload("rate", runsignal.FailureRateThreshold(1.5)); err == nil {
 		t.Error("failure rate 1.5 accepted")
 	}
+	for _, owner := range []string{"", "   ", strings.Repeat("a", 129)} {
+		if _, err := r.Workload("owned", runsignal.Owner(owner)); err == nil {
+			t.Errorf("owner %q accepted", owner)
+		}
+	}
+	if _, err := r.Workload("owned-max", runsignal.Owner(strings.Repeat("ş", 128))); err != nil {
+		t.Errorf("owner of 128 characters rejected: %v", err)
+	}
+	for _, url := range []string{"", "runbooks/sync", "/runbooks/sync", "ftp://wiki/sync", "mailto:ops@example.com",
+		"https://", "https://:8080/sync", "HTTPS://wiki/sync", "https://wiki/has space"} {
+		if _, err := r.Workload("runbook", runsignal.RunbookURL(url)); err == nil {
+			t.Errorf("runbook URL %q accepted", url)
+		}
+	}
+	if _, err := r.Workload("runbook-ok", runsignal.RunbookURL("http://wiki.local:8080/runbooks/sync")); err != nil {
+		t.Errorf("http runbook URL rejected: %v", err)
+	}
 
 	first := r.MustWorkload("sync", runsignal.WithSeverity(runsignal.Critical))
 	if again, _ := r.Workload("sync"); again != first {
@@ -287,7 +305,8 @@ func TestToWorkloadNameConformance(t *testing.T) {
 func TestManifestMatchesTheSchema(t *testing.T) {
 	r := runsignal.NewRegistry()
 	r.MustWorkload("stock-sync", runsignal.ExpectEvery(5*time.Minute), runsignal.FailureRateThreshold(0.2))
-	r.MustWorkload("nightly-invoice", runsignal.Schedule("0 2 * * *"), runsignal.MaxDuration(30*time.Minute),
+	r.MustWorkload("nightly-invoice", runsignal.RunbookURL("https://wiki.example.com/runbooks/invoice?a=1&b=2"),
+		runsignal.Owner("billing-team"), runsignal.Schedule("0 2 * * *"), runsignal.MaxDuration(30*time.Minute),
 		runsignal.MinProcessed(100), runsignal.WithSeverity(runsignal.Critical))
 
 	path := filepath.Join(t.TempDir(), "out", "manifest.json")
@@ -306,7 +325,9 @@ func TestManifestMatchesTheSchema(t *testing.T) {
       "schedule": "0 2 * * *",
       "maxDurationSeconds": 1800,
       "minProcessed": 100,
-      "severity": "critical"
+      "severity": "critical",
+      "owner": "billing-team",
+      "runbookUrl": "https://wiki.example.com/runbooks/invoice?a=1&b=2"
     },
     {
       "name": "stock-sync",

@@ -34,6 +34,8 @@ import org.springframework.transaction.PlatformTransactionManager;
     "runsignal.workloads.invoice-export.max-duration=30m",
     "runsignal.workloads.invoice-export.min-processed=5",
     "runsignal.workloads.invoice-export.severity=critical",
+    "runsignal.workloads.invoice-export.owner=billing-team",
+    "runsignal.workloads.invoice-export.runbook-url=https://wiki.example.com/invoice-export",
 })
 class BatchJobTest {
   static {
@@ -119,6 +121,9 @@ class BatchJobTest {
     assertThat(export.options().maxDuration()).contains(Duration.ofMinutes(30));
     assertThat(export.options().minProcessed()).hasValue(5);
     assertThat(export.options().severity()).isEqualTo(Severity.CRITICAL);
+    assertThat(export.options().owner()).contains("billing-team");
+    assertThat(export.options().runbookUrl()).contains("https://wiki.example.com/invoice-export");
+    assertThat(registry.workload("ledger-close").options().owner()).isEmpty();
 
     operator.start(invoiceExport, new JobParametersBuilder().addLong("run", 1L).toJobParameters());
     operator.start(ledgerClose, new JobParametersBuilder().addLong("run", 1L).toJobParameters());

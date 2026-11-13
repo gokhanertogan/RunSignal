@@ -40,4 +40,10 @@ public @interface RunSignal {
   double failureRateThreshold() default 0;
 
   Severity severity() default Severity.WARNING;
+
+  /** Who answers this workload's alerts: a team or person, such as {@code "billing-team"}; empty for none. */
+  String owner() default "";
+
+  /** Absolute http(s) URL of what to do when an alert fires; empty for none. */
+  String runbookUrl() default "";
 }

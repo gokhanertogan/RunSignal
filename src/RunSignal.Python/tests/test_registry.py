@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -172,6 +173,67 @@ def test_writes_the_same_manifest_as_the_other_sdks(tmp_path: Path, monkeypatch:
       "name": "stock-sync",
       "expectEverySeconds": 300,
       "failureRateThreshold": 0.2,
+      "severity": "warning"
+    }
+  ]
+}"""
+
+
+@pytest.mark.parametrize("owner", ["", "   ", "x" * 129])
+def test_a_blank_or_too_long_owner_is_rejected(owner: str) -> None:
+    with pytest.raises(WorkloadConfigurationError):
+        WorkloadRegistry().workload("owned", owner=owner)
+    with pytest.raises(WorkloadConfigurationError):
+        WorkloadRegistry().get_or_add("owned", owner=owner)
+
+
+@pytest.mark.parametrize("url", [
+    "", "wiki/billing", "/runbooks/billing", "ftp://example.com/runbook", "https://", "HTTPS://example.com",
+    "https://example.com/a b", "mailto:team@example.com",
+])
+def test_a_runbook_url_that_is_not_absolute_http_is_rejected(url: str) -> None:
+    with pytest.raises(WorkloadConfigurationError):
+        WorkloadRegistry().workload("runbook", runbook_url=url)
+    with pytest.raises(WorkloadConfigurationError):
+        WorkloadRegistry().monitor("runbook", runbook_url=url)
+
+
+def test_owner_and_runbook_url_are_written_after_severity_and_omitted_when_unset() -> None:
+    registry = WorkloadRegistry()
+    registry.workload("nightly-invoice", runbook_url="https://wiki.example.com/runbooks/nightly-invoice",
+                      owner="billing-team", severity="critical", schedule="0 2 * * *")
+    registry.get_or_add("only-owner", owner="x" * 128)
+
+    @registry.monitor("decorated", owner="Jane Doe", runbook_url="http://wiki.local/decorated")
+    def decorated() -> None:
+        pass
+
+    registry.workload("plain")
+
+    assert json.dumps(registry.manifest("billing"), indent=2, ensure_ascii=False) == """{
+  "version": 1,
+  "service": "billing",
+  "workloads": [
+    {
+      "name": "decorated",
+      "severity": "warning",
+      "owner": "Jane Doe",
+      "runbookUrl": "http://wiki.local/decorated"
+    },
+    {
+      "name": "nightly-invoice",
+      "schedule": "0 2 * * *",
+      "severity": "critical",
+      "owner": "billing-team",
+      "runbookUrl": "https://wiki.example.com/runbooks/nightly-invoice"
+    },
+    {
+      "name": "only-owner",
+      "severity": "warning",
+      "owner": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "plain",
       "severity": "warning"
     }
   ]

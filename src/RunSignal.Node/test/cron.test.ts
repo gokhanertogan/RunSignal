@@ -51,4 +51,12 @@ describe('cronJob', () => {
     cronJob('import', { schedule: '0 * * * *', registry }, () => {});
     assert.throws(() => cronJob('import', { schedule: '0 * * * *', registry }, () => {}), WorkloadConfigurationError);
   });
+
+  it('passes owner and runbookUrl through to the manifest', () => {
+    const { registry } = harness();
+    cronJob('report', { schedule: '0 6 * * *', owner: 'data-team', runbookUrl: 'https://wiki.example.com/report', registry }, () => {});
+    assert.deepEqual(registry.manifest('billing').workloads, [
+      { name: 'report', schedule: '0 6 * * *', severity: 'warning', owner: 'data-team', runbookUrl: 'https://wiki.example.com/report' },
+    ]);
+  });
 });

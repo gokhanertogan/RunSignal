@@ -108,6 +108,8 @@ Each run may be recorded as an `INTERNAL` span named after the workload, with th
 | `minProcessed` | Fewest items a run should process | `low-output` |
 | `failureRateThreshold` | Highest acceptable share of failed runs or items (0–1) | `failure-rate` |
 | `severity` | `info` \| `warning` \| `critical` | Routing (for example critical → on-call) |
+| `owner` | Who answers this workload's alerts: a team or person, such as `billing-team` | Added to every alert's description, and as the `owner` label on Prometheus rules for routing |
+| `runbookUrl` | An absolute `http`/`https` URL of what to do when an alert fires | Added to every alert's description, and as the `runbook_url` annotation on Prometheus rules |
 | `timeZone` | IANA time zone the `schedule` runs in, such as `Europe/Istanbul`. Without it, the alert tooling's time zone (UTC by default) applies | (affects `missed`) |
 | `reporting` | `continuous` (default) or `per-run`; see below | (affects how absence is detected) |
 
@@ -143,7 +145,12 @@ SDKs produce the manifest from the running application, not at build time. Sched
 runtime (for example Hangfire recurring jobs registered in code, or cron triggers loaded from configuration), so
 only the running application knows its complete set of workloads. At startup, SDKs discover jobs that have not
 run yet from their schedulers, so a job that never starts still gets a `missed` alert. Durations are in seconds.
-Workloads are sorted by name, and the manifest contains no timestamps, so it diffs cleanly.
+Workloads are sorted by name, and the manifest contains no timestamps, so it diffs cleanly. Within a workload, SDKs
+write the fields in the order of the table above (`name` first), omit unset optional fields, and write `owner` and
+`runbookUrl` after `severity`, so every SDK writes the same bytes for the same workloads. Strings are written with
+only the escapes JSON requires (`\"`, `\\` and control characters): non-ASCII letters and `&`, `<`, `>`, `'` are
+written as they are, so an owner such as `Gökhan & Billing` or a runbook URL with a query string reads the same in
+every SDK's manifest.
 
 ## Conformance
 

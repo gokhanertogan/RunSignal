@@ -196,6 +196,13 @@ describe('registry', () => {
     }
     assert.throws(() => registry.workload('rate', { failureRateThreshold: 1.5 }), WorkloadConfigurationError);
     assert.throws(() => registry.workload('soon', { maxDuration: 'soon' }), WorkloadConfigurationError);
+    for (const owner of ['', '   ', 'x'.repeat(129)]) {
+      assert.throws(() => registry.workload('owned', { owner }), WorkloadConfigurationError, JSON.stringify(owner));
+    }
+    for (const runbookUrl of ['', 'wiki/billing', 'ftp://example.com/runbook', 'https://', 'HTTPS://example.com', 'https://example.com/a b', '/runbooks/billing']) {
+      assert.throws(() => registry.workload('runbook', { runbookUrl }), WorkloadConfigurationError, runbookUrl);
+    }
+    assert.equal(registry.workload('owned', { owner: 'x'.repeat(128), runbookUrl: 'http://wiki.local/billing' }).expectations.owner, 'x'.repeat(128));
 
     const first = registry.workload('sync', { severity: 'critical' });
     assert.equal(registry.workload('sync'), first);
@@ -241,6 +248,41 @@ describe('registry', () => {
       "name": "stock-sync",
       "expectEverySeconds": 300,
       "failureRateThreshold": 0.2,
+      "severity": "warning"
+    }
+  ]
+}`);
+  });
+
+  it('writes owner and runbookUrl after severity, and omits them when unset', () => {
+    const registry = new WorkloadRegistry();
+    registry.workload('nightly-invoice', {
+      runbookUrl: 'https://wiki.example.com/runbooks/nightly-invoice',
+      owner: 'billing-team',
+      severity: 'critical',
+      schedule: '0 2 * * *',
+    });
+    registry.workload('only-owner', { owner: 'Jane Doe' });
+    registry.workload('plain', {});
+
+    assert.equal(JSON.stringify(registry.manifest('billing'), null, 2), `{
+  "version": 1,
+  "service": "billing",
+  "workloads": [
+    {
+      "name": "nightly-invoice",
+      "schedule": "0 2 * * *",
+      "severity": "critical",
+      "owner": "billing-team",
+      "runbookUrl": "https://wiki.example.com/runbooks/nightly-invoice"
+    },
+    {
+      "name": "only-owner",
+      "severity": "warning",
+      "owner": "Jane Doe"
+    },
+    {
+      "name": "plain",
       "severity": "warning"
     }
   ]

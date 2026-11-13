@@ -1,6 +1,7 @@
 package io.runsignal.spring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
@@ -42,6 +43,8 @@ class RunSignalAutoConfigurationTest {
     registry.add("spring.application.name", () -> "billing");
     registry.add("runsignal.manifest-path", () -> dir.resolve("runsignal.json").toString());
     registry.add("jobs.cleanup.cron", () -> "@daily");
+    registry.add("runsignal.workloads.weekly-report.owner", () -> "ops-team");
+    registry.add("runsignal.workloads.weekly-report.runbook-url", () -> "https://wiki.example.com/weekly");
   }
 
   @SpringBootConfiguration
@@ -84,8 +87,14 @@ class RunSignalAutoConfigurationTest {
     }
 
     @Scheduled(cron = "0 0 4 * * *")
-    @RunSignal(value = "nightly-report", maxDuration = "10m", severity = Severity.CRITICAL)
+    @RunSignal(value = "nightly-report", maxDuration = "10m", severity = Severity.CRITICAL,
+        owner = "billing-team", runbookUrl = "https://wiki.example.com/nightly")
     void nightly() {}
+
+    // The properties take precedence over the annotation.
+    @Scheduled(cron = "0 0 5 * * 1")
+    @RunSignal(value = "weekly-report", owner = "annotated-team")
+    void weekly() {}
 
     @Scheduled(cron = "${jobs.cleanup.cron}")
     void cleanup() {}
@@ -135,10 +144,28 @@ class RunSignalAutoConfigurationTest {
     assertThat(nightly.options().schedule()).contains("0 0 4 * * *");
     assertThat(nightly.options().maxDuration()).contains(Duration.ofMinutes(10));
     assertThat(nightly.options().severity()).isEqualTo(Severity.CRITICAL);
+    assertThat(nightly.options().owner()).contains("billing-team");
+    assertThat(nightly.options().runbookUrl()).contains("https://wiki.example.com/nightly");
+    Workload weekly = registry.workload("weekly-report");
+    assertThat(weekly.options().owner()).contains("ops-team");
+    assertThat(weekly.options().runbookUrl()).contains("https://wiki.example.com/weekly");
+    assertThat(weekly.options().schedule()).contains("0 0 5 * * 1");
     assertThat(registry.workload("jobs.cleanup").options().schedule()).contains("0 0 0 * * *");
+    assertThat(registry.workload("jobs.cleanup").options().owner()).isEmpty();
 
     String manifest = Files.readString(dir.resolve("runsignal.json"));
-    assertThat(manifest).contains("\"service\": \"billing\"", "\"name\": \"nightly-report\"", "\"name\": \"jobs.cleanup\"");
+    assertThat(manifest).contains("\"service\": \"billing\"", "\"name\": \"nightly-report\"", "\"name\": \"jobs.cleanup\"",
+        "\"severity\": \"critical\",\n      \"owner\": \"billing-team\",\n      \"runbookUrl\": \"https://wiki.example.com/nightly\"\n    }");
+  }
+
+  @Test
+  void invalidOwnerOrRunbookUrlInPropertiesIsRejected() {
+    RunSignalProperties.Workload blankOwner = new RunSignalProperties.Workload();
+    blankOwner.setOwner(" ");
+    assertThatThrownBy(() -> blankOwner.toOptions(null)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("owner");
+    RunSignalProperties.Workload relativeUrl = new RunSignalProperties.Workload();
+    relativeUrl.setRunbookUrl("wiki/runbook");
+    assertThatThrownBy(() -> relativeUrl.toOptions(null)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("runbookUrl");
   }
 
   @Test

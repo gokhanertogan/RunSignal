@@ -43,11 +43,14 @@ def test_jobs_are_registered_with_their_schedule_and_every_run_is_recorded(harne
     scheduler.add_job(generate_invoices, "cron", hour=2, minute=0, id="Nightly Invoice", args=[3])
     scheduler.add_job(import_statement, "interval", minutes=5, name="ImportStatement")
 
-    instrument(scheduler, registry=h.registry, workloads={"nightly-invoice": {"severity": "critical"}})
+    instrument(scheduler, registry=h.registry, workloads={
+        "nightly-invoice": {"severity": "critical", "owner": "billing-team", "runbook_url": "https://wiki.example.com/invoices"},
+    })
 
     assert h.registry.manifest("billing")["workloads"] == [
         {"name": "import-statement", "severity": "warning"},
-        {"name": "nightly-invoice", "schedule": "0 2 * * *", "severity": "critical"},
+        {"name": "nightly-invoice", "schedule": "0 2 * * *", "severity": "critical", "owner": "billing-team",
+         "runbookUrl": "https://wiki.example.com/invoices"},
     ]
 
     # Fire both jobs the way the scheduler does, with their stored arguments.

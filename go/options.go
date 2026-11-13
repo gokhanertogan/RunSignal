@@ -3,8 +3,10 @@ package runsignal
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Severity is how urgent a workload's alerts are; it routes notifications.
@@ -69,6 +71,15 @@ type Expectations struct {
 	FailureRateThreshold float64
 	// Severity is how urgent the workload's alerts are.
 	Severity Severity
+	// Owner is who answers the workload's alerts: a team or person, such as "billing-team". Added to alert
+	// descriptions and, on Prometheus rules, as the owner label.
+	Owner string
+	// RunbookURL is an absolute http or https URL of what to do when an alert fires. Added to alert
+	// descriptions and, on Prometheus rules, as the runbook_url annotation.
+	RunbookURL string
+
+	// Set by Owner and RunbookURL, so an explicit empty value is rejected rather than read as unset.
+	ownerSet, runbookURLSet bool
 }
 
 // Option sets one of a workload's expectations.
@@ -94,6 +105,17 @@ func FailureRateThreshold(rate float64) Option {
 // WithSeverity sets how urgent the workload's alerts are.
 func WithSeverity(s Severity) Option { return func(e *Expectations) { e.Severity = s } }
 
+// Owner sets who answers the workload's alerts: a team or person, such as "billing-team". It must not be blank
+// and is at most 128 characters.
+func Owner(owner string) Option { return func(e *Expectations) { e.Owner = owner; e.ownerSet = true } }
+
+// RunbookURL sets the absolute http or https URL of what to do when an alert fires.
+func RunbookURL(runbookURL string) Option {
+	return func(e *Expectations) { e.RunbookURL = runbookURL; e.runbookURLSet = true }
+}
+
+const maxOwnerLength = 128
+
 func (e Expectations) validate() error {
 	switch {
 	case e.MaxDuration < 0, e.ExpectEvery < 0:
@@ -102,6 +124,20 @@ func (e Expectations) validate() error {
 		return fmt.Errorf("runsignal: MinProcessed must not be negative")
 	case e.FailureRateThreshold < 0, e.FailureRateThreshold > 1:
 		return fmt.Errorf("runsignal: FailureRateThreshold must be between 0 and 1, got %v", e.FailureRateThreshold)
+	case (e.ownerSet || e.Owner != "") && strings.TrimSpace(e.Owner) == "":
+		return fmt.Errorf("runsignal: Owner must not be blank")
+	case utf8.RuneCountInString(e.Owner) > maxOwnerLength:
+		return fmt.Errorf("runsignal: Owner must be at most %d characters, got %d", maxOwnerLength, utf8.RuneCountInString(e.Owner))
+	case (e.runbookURLSet || e.RunbookURL != "") && !isHTTPURL(e.RunbookURL):
+		return fmt.Errorf("runsignal: RunbookURL must be an absolute http or https URL, got %q", e.RunbookURL)
 	}
 	return nil
+}
+
+func isHTTPURL(raw string) bool {
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && u.Hostname() != "" && !strings.ContainsAny(raw, " \t\r\n")
 }

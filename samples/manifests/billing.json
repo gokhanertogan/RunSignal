@@ -15,7 +15,9 @@
       "schedule": "0 2 * * *",
       "maxDurationSeconds": 2700,
       "minProcessed": 100,
-      "severity": "critical"
+      "severity": "critical",
+      "owner": "billing-team",
+      "runbookUrl": "https://github.com/gokhanertogan/RunSignal/blob/main/docs/dotnet.md"
     },
     {
       "name": "stock-sync",

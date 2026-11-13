@@ -19,7 +19,7 @@ public sealed record WorkloadManifest
     public required IReadOnlyList<WorkloadManifestEntry> Workloads { get; init; }
 
     /// <summary>Serializes the manifest to indented JSON.</summary>
-    public string ToJson() => JsonSerializer.Serialize(this, WorkloadManifestJsonContext.Default.WorkloadManifest);
+    public string ToJson() => JsonSerializer.Serialize(this, WorkloadManifestJsonContext.Relaxed.WorkloadManifest);
 
     /// <summary>Reads a manifest from JSON.</summary>
     public static WorkloadManifest FromJson(string json) =>
@@ -51,6 +51,12 @@ public sealed record WorkloadManifestEntry
     /// <inheritdoc cref="WorkloadOptions.Severity"/>
     public Severity Severity { get; init; } = Severity.Warning;
 
+    /// <inheritdoc cref="WorkloadOptions.Owner"/>
+    public string? Owner { get; init; }
+
+    /// <inheritdoc cref="WorkloadOptions.RunbookUrl"/>
+    public string? RunbookUrl { get; init; }
+
     /// <summary>
     /// How the workload's signals arrive. <see langword="null"/> means <see cref="WorkloadReporting.Continuous"/>:
     /// a long-running process reports all the time. SDKs never set it.
@@ -75,6 +81,8 @@ public sealed record WorkloadManifestEntry
             MinProcessed = o.MinProcessed,
             FailureRateThreshold = o.FailureRateThreshold,
             Severity = o.Severity,
+            Owner = o.Owner,
+            RunbookUrl = o.RunbookUrl,
         };
     }
 }
@@ -85,7 +93,26 @@ public sealed record WorkloadManifestEntry
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     Converters = [typeof(SeverityJsonConverter), typeof(WorkloadReportingJsonConverter)])]
 [JsonSerializable(typeof(WorkloadManifest))]
-internal sealed partial class WorkloadManifestJsonContext : JsonSerializerContext;
+internal sealed partial class WorkloadManifestJsonContext : JsonSerializerContext
+{
+    // Only the escapes JSON requires, as the spec asks of every SDK: "Gökhan & Billing" and URLs with a query string
+    // stay readable and identical across languages instead of becoming "G\u00F6khan \u0026 Billing". The manifest is a
+    // file for tools, never embedded in HTML, so the relaxed encoder is safe here.
+    // Built on first use: a static initializer here could run before the generated Default exists, since the order of
+    // static fields across the partial class's files is not defined. A race only builds an equal instance twice.
+    private static WorkloadManifestJsonContext? s_relaxed;
+
+    internal static WorkloadManifestJsonContext Relaxed => s_relaxed ??= CreateRelaxed();
+
+    private static WorkloadManifestJsonContext CreateRelaxed()
+    {
+        var options = new JsonSerializerOptions(Default.Options)
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
+        return new WorkloadManifestJsonContext(options);
+    }
+}
 
 // Writes severities as "info", "warning" and "critical", as the spec defines them.
 internal sealed class SeverityJsonConverter() : JsonStringEnumConverter<Severity>(JsonNamingPolicy.CamelCase, allowIntegerValues: false);

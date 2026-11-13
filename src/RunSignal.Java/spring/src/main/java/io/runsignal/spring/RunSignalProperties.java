@@ -29,6 +29,8 @@ public class RunSignalProperties {
     private long minProcessed;
     private double failureRateThreshold;
     private io.runsignal.Severity severity;
+    private String owner;
+    private String runbookUrl;
 
     public String getSchedule() { return schedule; }
     public void setSchedule(String schedule) { this.schedule = schedule; }
@@ -42,6 +44,12 @@ public class RunSignalProperties {
     public void setFailureRateThreshold(double failureRateThreshold) { this.failureRateThreshold = failureRateThreshold; }
     public io.runsignal.Severity getSeverity() { return severity; }
     public void setSeverity(io.runsignal.Severity severity) { this.severity = severity; }
+    /** Who answers this workload's alerts: a team or person. */
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
+    /** Absolute http(s) URL of what to do when an alert fires. */
+    public String getRunbookUrl() { return runbookUrl; }
+    public void setRunbookUrl(String runbookUrl) { this.runbookUrl = runbookUrl; }
 
     /** These expectations as options; {@code schedule} is used when none is configured. */
     io.runsignal.WorkloadOptions toOptions(String fallbackSchedule) {
@@ -53,6 +61,8 @@ public class RunSignalProperties {
       if (minProcessed > 0) b.minProcessed(minProcessed);
       if (failureRateThreshold > 0) b.failureRateThreshold(failureRateThreshold);
       if (severity != null) b.severity(severity);
+      if (owner != null) b.owner(owner);
+      if (runbookUrl != null) b.runbookUrl(runbookUrl);
       return b.build();
     }
   }

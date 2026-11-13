@@ -51,6 +51,24 @@ set, or a workload that records nothing for a while (a nightly job) reports no g
 Set the global provider once: a registry stops following it after it has collected the gauges.
 `Registry::with_meter(meter)` takes an explicit meter.
 
+## Expectations
+
+`Options` define a workload's alerts; they do not change what is recorded.
+
+| Builder method | Meaning | Alert |
+|---|---|---|
+| `.schedule("0 2 * * *")` | Cron expression for when the workload should run | `missed` |
+| `.max_duration(d)` | Longest acceptable run | `overrun`, `hung` |
+| `.expect_every(d)` | Longest acceptable gap between heartbeats | `stalled` |
+| `.min_processed(n)` | Fewest items a run should process | `low-output` |
+| `.failure_rate_threshold(0.2)` | Highest acceptable share (0 to 1) of failed runs or items | `failure-rate` |
+| `.severity(Severity::Critical)` | `Info`, `Warning` (default) or `Critical`; routes notifications | |
+| `.owner("billing-team")` | Who answers the alerts, a team or person; not blank, at most 128 characters | Added to alert descriptions, `owner` label on Prometheus rules |
+| `.runbook_url("https://wiki.example.com/runbooks/invoice")` | Absolute `http`/`https` URL of what to do when an alert fires | Added to alert descriptions, `runbook_url` annotation on Prometheus rules |
+
+Invalid options, such as a blank owner or a relative runbook URL, make `registry.workload(...)` return
+`Error::InvalidOptions`.
+
 ## Recording work
 
 | Call | Records |

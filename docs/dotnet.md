@@ -122,6 +122,9 @@ public async Task GenerateInvoices(PerformContext? context = null)
 }
 ```
 
+`Owner` and `RunbookUrl` (on the attribute or in `AddWorkload`) put who to call and what to do into every alert:
+`[Workload("nightly-invoice", Owner = "billing-team", RunbookUrl = "https://wiki.example.com/runbooks/invoice")]`.
+
 Durations accept `90s`, `30m`, `2h`, `1d` or `hh:mm:ss`. Options declared with `AddWorkload` for the same name
 take precedence over the attribute.
 

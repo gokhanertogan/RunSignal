@@ -39,9 +39,16 @@ pub(crate) fn write(service: &str, workloads: &[Workload]) -> String {
         }
         let _ = write!(
             b,
-            ",\n      \"severity\": {}\n    }}",
+            ",\n      \"severity\": {}",
             string(o.get_severity().as_str())
         );
+        if let Some(owner) = o.get_owner() {
+            let _ = write!(b, ",\n      \"owner\": {}", string(owner));
+        }
+        if let Some(url) = o.get_runbook_url() {
+            let _ = write!(b, ",\n      \"runbookUrl\": {}", string(url));
+        }
+        b.push_str("\n    }");
     }
     b.push_str(if workloads.is_empty() {
         "]\n}"

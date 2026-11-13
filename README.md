@@ -121,6 +121,8 @@ that it is missing.
 | `minProcessed` | 100 | **low output**: runs processed fewer items |
 | `failureRateThreshold` | 0.2 | **failure rate**: too many failed runs or items |
 | `severity` | `critical` | routes the alerts (for example, critical pages on-call) |
+| `owner` | `billing-team` | named in every alert; the `owner` label on Prometheus rules, for routing to that team |
+| `runbookUrl` | `https://wiki/…` | linked from every alert; the `runbook_url` annotation on Prometheus rules |
 
 ## Quick start
 
@@ -361,6 +363,8 @@ Suspended CronJobs are skipped. Annotations set the rest:
 | `runsignal.io/max-duration` | `45m` (overrides `activeDeadlineSeconds`) |
 | `runsignal.io/min-processed` | `100` |
 | `runsignal.io/failure-rate` | `0.2` |
+| `runsignal.io/owner` | `billing-team` |
+| `runsignal.io/runbook-url` | `https://wiki.example.com/runbooks/invoice-export` |
 | `runsignal.io/ignore` | `true` |
 
 ## GitHub Actions

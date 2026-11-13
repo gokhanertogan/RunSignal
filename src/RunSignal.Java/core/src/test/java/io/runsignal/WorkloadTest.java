@@ -340,6 +340,68 @@ class WorkloadTest {
   }
 
   @Test
+  void manifestWritesOwnerAndRunbookUrlAfterSeverity(@TempDir Path dir) throws IOException {
+    registry.workload("nightly-invoice", WorkloadOptions.builder().schedule("0 2 * * *").severity(Severity.CRITICAL)
+        .runbookUrl("https://wiki.example.com/runbooks/nightly-invoice").owner("billing-team").build());
+    registry.workload("only-owner", WorkloadOptions.builder().owner("jane").build());
+    registry.workload("only-runbook", WorkloadOptions.builder().runbookUrl("http://runbooks.local/x").build());
+
+    Path path = dir.resolve("manifest.json");
+    registry.writeManifest(path, "billing");
+
+    assertThat(Files.readString(path)).isEqualTo("""
+        {
+          "version": 1,
+          "service": "billing",
+          "workloads": [
+            {
+              "name": "nightly-invoice",
+              "schedule": "0 2 * * *",
+              "severity": "critical",
+              "owner": "billing-team",
+              "runbookUrl": "https://wiki.example.com/runbooks/nightly-invoice"
+            },
+            {
+              "name": "only-owner",
+              "severity": "warning",
+              "owner": "jane"
+            },
+            {
+              "name": "only-runbook",
+              "severity": "warning",
+              "runbookUrl": "http://runbooks.local/x"
+            }
+          ]
+        }""");
+  }
+
+  @Test
+  void ownerAndRunbookUrlAreUnsetByDefault() {
+    assertThat(WorkloadOptions.NONE.owner()).isEmpty();
+    assertThat(WorkloadOptions.NONE.runbookUrl()).isEmpty();
+    WorkloadOptions o = WorkloadOptions.builder().owner("a".repeat(128)).runbookUrl("HTTPS://example.com").build();
+    assertThat(o.owner()).hasValue("a".repeat(128));
+    assertThat(o.runbookUrl()).hasValue("HTTPS://example.com");
+  }
+
+  @Test
+  void blankOrTooLongOwnerIsRejected() {
+    for (String owner : new String[] {null, "", "   ", "a".repeat(129)}) {
+      assertThatThrownBy(() -> WorkloadOptions.builder().owner(owner)).as(String.valueOf(owner))
+          .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("owner");
+    }
+  }
+
+  @Test
+  void runbookUrlMustBeAnAbsoluteHttpUrl() {
+    for (String url : new String[] {null, "", "  ", "wiki/runbook", "/runbooks/x", "ftp://example.com/x",
+        "mailto:ops@example.com", "https://", "http:///path", "https://exa mple.com", " https://example.com"}) {
+      assertThatThrownBy(() -> WorkloadOptions.builder().runbookUrl(url)).as(String.valueOf(url))
+          .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("runbookUrl");
+    }
+  }
+
+  @Test
   void attributeKeysMatchTheSpec() {
     assertThat(Workload.WORKLOAD).isEqualTo(AttributeKey.stringKey("runsignal.workload"));
     assertThat(Workload.ERROR_TYPE).isEqualTo(AttributeKey.stringKey("error.type"));

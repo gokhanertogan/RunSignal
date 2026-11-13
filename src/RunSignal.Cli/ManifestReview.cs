@@ -47,6 +47,10 @@ internal static partial class ManifestReview
                     Error($"{w.Name}: expectEverySeconds must be above 0.");
                 if (w.MinProcessed is < 1)
                     Error($"{w.Name}: minProcessed must be at least 1.");
+                if (w.Owner is { } owner && (string.IsNullOrWhiteSpace(owner) || owner.Length > 128))
+                    Error($"{w.Name}: owner must be 1 to 128 characters and not blank.");
+                if (w.RunbookUrl is { } runbook && !WorkloadOptions.IsWebUrl(runbook))
+                    Error($"{w.Name}: runbookUrl '{runbook}' is not an absolute http or https URL.");
                 if (w.FailureRateThreshold is { } rate && rate is <= 0 or > 1)
                     Error($"{w.Name}: failureRateThreshold must be above 0 and at most 1.");
                 if (w.Schedule is not null)
@@ -134,10 +138,14 @@ internal static partial class ManifestReview
         var alerts = new Dictionary<(string, string, string), string>();
         foreach (var manifest in manifests)
         {
+            var owners = manifest.Workloads.Where(w => w.Owner is not null).ToDictionary(w => w.Name, w => w.Owner!, StringComparer.Ordinal);
             foreach (var policy in AlertPlanner.Plan(manifest, options).Policies)
             {
                 foreach (var c in policy.Conditions)
-                    alerts[(manifest.Service, c.Workload, Name(c.Kind))] = $"{Describe(c)}, {policy.Severity.ToString().ToLowerInvariant()}";
+                {
+                    var owner = owners.TryGetValue(c.Workload, out var o) ? $", owner {o}" : "";
+                    alerts[(manifest.Service, c.Workload, Name(c.Kind))] = $"{Describe(c)}, {policy.Severity.ToString().ToLowerInvariant()}{owner}";
+                }
             }
         }
         return alerts;

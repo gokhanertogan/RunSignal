@@ -46,7 +46,11 @@ pub struct Options {
     pub(crate) min_processed: Option<u64>,
     pub(crate) failure_rate_threshold: Option<f64>,
     pub(crate) severity: Severity,
+    pub(crate) owner: Option<String>,
+    pub(crate) runbook_url: Option<String>,
 }
+
+const MAX_OWNER_LENGTH: usize = 128;
 
 impl Options {
     /// No expectations.
@@ -90,6 +94,20 @@ impl Options {
         self
     }
 
+    /// Who answers the workload's alerts: a team or person, such as `billing-team`. Added to alert descriptions,
+    /// and as the `owner` label on Prometheus rules. Must not be blank; at most 128 characters.
+    pub fn owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Some(owner.into());
+        self
+    }
+
+    /// Absolute `http` or `https` URL of what to do when an alert fires. Added to alert descriptions, and as the
+    /// `runbook_url` annotation on Prometheus rules.
+    pub fn runbook_url(mut self, url: impl Into<String>) -> Self {
+        self.runbook_url = Some(url.into());
+        self
+    }
+
     pub fn get_schedule(&self) -> Option<&str> {
         self.schedule.as_deref()
     }
@@ -114,6 +132,14 @@ impl Options {
         self.severity
     }
 
+    pub fn get_owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    pub fn get_runbook_url(&self) -> Option<&str> {
+        self.runbook_url.as_deref()
+    }
+
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if let Some(rate) = self.failure_rate_threshold {
             if !(0.0..=1.0).contains(&rate) {
@@ -127,6 +153,39 @@ impl Options {
         {
             return Err(Error::InvalidOptions("durations must be positive".into()));
         }
+        if let Some(owner) = &self.owner {
+            if owner.trim().is_empty() {
+                return Err(Error::InvalidOptions("owner must not be blank".into()));
+            }
+            let length = owner.chars().count();
+            if length > MAX_OWNER_LENGTH {
+                return Err(Error::InvalidOptions(format!(
+                    "owner must be at most {MAX_OWNER_LENGTH} characters, got {length}"
+                )));
+            }
+        }
+        if let Some(url) = &self.runbook_url {
+            if !is_http_url(url) {
+                return Err(Error::InvalidOptions(format!(
+                    "runbook_url must be an absolute http or https URL, got {url:?}"
+                )));
+            }
+        }
         Ok(())
     }
+}
+
+/// An absolute `http://` or `https://` URL with a host and no whitespace or control characters.
+fn is_http_url(url: &str) -> bool {
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    !host.is_empty()
+        && !host.starts_with(':')
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
 }

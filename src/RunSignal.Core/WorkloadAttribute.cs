@@ -41,6 +41,12 @@ public sealed class WorkloadAttribute : Attribute
     /// <inheritdoc cref="WorkloadOptions.Severity"/>
     public Severity Severity { get; set; } = Severity.Warning;
 
+    /// <inheritdoc cref="WorkloadOptions.Owner"/>
+    public string? Owner { get; set; }
+
+    /// <inheritdoc cref="WorkloadOptions.RunbookUrl"/>
+    public string? RunbookUrl { get; set; }
+
     /// <summary>Copies the expectations set on this attribute to <paramref name="options"/>.</summary>
     /// <exception cref="FormatException"><see cref="MaxDuration"/> or <see cref="ExpectEvery"/> is not a valid duration.</exception>
     public void ApplyTo(WorkloadOptions options)
@@ -57,6 +63,10 @@ public sealed class WorkloadAttribute : Attribute
         if (FailureRateThreshold > 0)
             options.FailureRateThreshold = FailureRateThreshold;
         options.Severity = Severity;
+        if (Owner is not null)
+            options.Owner = Owner;
+        if (RunbookUrl is not null)
+            options.RunbookUrl = RunbookUrl;
     }
 
     internal static TimeSpan ParseDuration(string value, string property)

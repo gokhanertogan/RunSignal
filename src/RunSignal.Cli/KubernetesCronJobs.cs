@@ -20,6 +20,8 @@ internal static partial class KubernetesCronJobs
         public const string MaxDuration = Prefix + "max-duration";
         public const string MinProcessed = Prefix + "min-processed";
         public const string FailureRate = Prefix + "failure-rate";
+        public const string Owner = Prefix + "owner";
+        public const string RunbookUrl = Prefix + "runbook-url";
     }
 
     // Kubernetes accepts these macros; the manifest takes plain cron.
@@ -81,6 +83,8 @@ internal static partial class KubernetesCronJobs
                 FailureRateThreshold = annotations.TryGetValue(Annotations.FailureRate, out var rate) ? ParseRate(rate, source) : null,
                 Severity = annotations.TryGetValue(Annotations.Severity, out var severity) ? ParseSeverity(severity, source) : Severity.Warning,
                 Reporting = WorkloadReporting.PerRun,
+                Owner = annotations.TryGetValue(Annotations.Owner, out var owner) ? ParseOwner(owner, source) : null,
+                RunbookUrl = annotations.TryGetValue(Annotations.RunbookUrl, out var runbook) ? ParseRunbook(runbook, source) : null,
             };
 
             if (workloads.TryGetValue(entry.Name, out var existing))
@@ -174,6 +178,16 @@ internal static partial class KubernetesCronJobs
         Enum.TryParse<Severity>(text, ignoreCase: true, out var value) && Enum.IsDefined(value) && !int.TryParse(text, out _)
             ? value
             : throw new FormatException($"{source}: {Annotations.Severity} '{text}' is not info, warning or critical.");
+
+    private static string ParseOwner(string text, string source) =>
+        text.Length is > 0 and <= 128
+            ? text
+            : throw new FormatException($"{source}: {Annotations.Owner} must be 1 to 128 characters.");
+
+    private static string ParseRunbook(string text, string source) =>
+        WorkloadOptions.IsWebUrl(text)
+            ? text
+            : throw new FormatException($"{source}: {Annotations.RunbookUrl} '{text}' is not an absolute http or https URL.");
 
     [GeneratedRegex(@"^(CRON_TZ|TZ)=(?<zone>\S+)\s+")]
     private static partial Regex TimeZonePrefix();
