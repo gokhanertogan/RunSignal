@@ -4,7 +4,7 @@ All notable changes to RunSignal are recorded here. Every SDK and package in thi
 with the same version number. The project follows [Semantic Versioning](https://semver.org/); until 1.0, minor
 versions may contain breaking changes.
 
-## Unreleased
+## 0.4.0 (2026-11-14)
 
 ### Added
 - `runsignal export grafana-alerts`: the alert rules as a Grafana alerting provisioning file, for Grafana-managed

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "runsignal"
-version = "0.3.0"
+version = "0.4.0"
 description = "Cron job and background job monitoring for Python with OpenTelemetry: alert when a Celery task, APScheduler job or cron script is missed, fails, overruns, stalls or processes nothing, in New Relic, Prometheus and Grafana."
 readme = "README.md"
 license = "MIT"
