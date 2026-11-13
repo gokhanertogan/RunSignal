@@ -27,6 +27,11 @@ public sealed class DashboardTests : IDisposable
             Enumerable.Range(w.Column, w.Width).SelectMany(c => Enumerable.Range(w.Row, w.Height).Select(r => (c, r)))).ToList();
         Assert.Equal(cells.Count, cells.Distinct().Count());
         Assert.All(widgets, w => Assert.InRange(w.Column + w.Width - 1, 1, 12));
+
+        // The hung alert's gauge has a widget, and last success comes from successful runs, which per-run workloads
+        // (runsignal exec) report even though their since_success gauge stops between runs.
+        Assert.Contains(widgets, w => w.Nrql.Contains("max(runsignal.workload.active_run_age)", StringComparison.Ordinal));
+        Assert.Contains("toDatetime(filter(latest(timestamp), WHERE runsignal.outcome = 'success')", Assert.Single(widgets, w => w.Title == "Workloads").Nrql);
     }
 
     [Fact]

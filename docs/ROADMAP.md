@@ -166,7 +166,7 @@ Conformance ✅: `spec/conformance/signals.json` defines a scenario and the exac
     - A binary built on the .NET SDK images needs glibc 2.38, which excludes Debian 12 and Ubuntu 22.04.
     - Without libssl, .NET terminates the process on the first HTTPS request, which would have replaced the command's exit code. exec now checks for libssl first.
 - Follow-ups:
-  - Grafana and New Relic dashboards for per-run workloads.
+  - Grafana and New Relic dashboards for per-run workloads ✅ (verified against a local Prometheus, and the new NRQL against New Relic).
   - `discover crontab`.
 
 ### Also done

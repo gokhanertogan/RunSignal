@@ -27,8 +27,8 @@ The CLI is also released as native executables (release assets, with `SHA256SUMS
 `ghcr.io/gokhanertogan/runsignal`, tagged with the version and `latest`.
 - Linux binaries are built inside `src/RunSignal.Cli/Dockerfile` on AlmaLinux 8, so they need only glibc 2.28.
   CI runs them on Debian 10 and Alpine.
-- The image is pushed with the workflow's `GITHUB_TOKEN`. A new GitHub package starts private: after the first
-  release, make `runsignal` public in the package settings.
+- The image is pushed with the workflow's `GITHUB_TOKEN`. The package is linked to this public repository through
+  its `org.opencontainers.image.source` label, so it is public too.
 
 ## Credentials
 

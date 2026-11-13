@@ -44,8 +44,10 @@ public sealed class NewRelicDashboards
             new("Runs in the last hour", "viz.billboard",
                 $"SELECT filter(sum({Instruments.Runs}), WHERE {Attributes.Outcome} = 'success') AS 'Succeeded', filter(sum({Instruments.Runs}), WHERE {failure}) AS 'Failed', filter(sum({Instruments.Runs}), WHERE {Attributes.Outcome} = 'cancelled') AS 'Cancelled' {from} SINCE 1 hour ago",
                 1, 1, 4, 3),
+            // Last success comes from successful runs rather than the since_success gauge, which a per-run workload
+            // (runsignal exec) only reports while it is running.
             new("Workloads", "viz.table",
-                $"SELECT latest({Instruments.SinceSuccess}) AS 'Seconds since success', latest({Instruments.SinceHeartbeat}) AS 'Seconds since heartbeat', sum({Instruments.Runs}) AS 'Runs', filter(sum({Instruments.Runs}), WHERE {failure}) AS 'Failed runs' {from} FACET {Attributes.Workload} SINCE 1 day ago LIMIT MAX",
+                $"SELECT toDatetime(filter(latest(timestamp), WHERE {Attributes.Outcome} = 'success'), 'yyyy-MM-dd HH:mm') AS 'Last success (UTC)', latest({Instruments.SinceHeartbeat}) AS 'Seconds since heartbeat', sum({Instruments.Runs}) AS 'Runs', filter(sum({Instruments.Runs}), WHERE {failure}) AS 'Failed runs' {from} FACET {Attributes.Workload} SINCE 7 days ago LIMIT MAX",
                 5, 1, 8, 3),
             new("Runs by outcome", "viz.line",
                 $"SELECT sum({Instruments.Runs}) {from} FACET {Attributes.Workload}, {Attributes.Outcome} SINCE 1 day ago TIMESERIES",
@@ -61,7 +63,10 @@ public sealed class NewRelicDashboards
                 7, 7, 6, 3),
             new("Failures by error type", "viz.table",
                 $"SELECT sum({Instruments.Runs}) AS 'Failed runs' {from} AND {failure} FACET {Attributes.Workload}, {Attributes.ErrorType} SINCE 1 day ago LIMIT MAX",
-                1, 10, 12, 3),
+                1, 10, 6, 3),
+            new("Oldest unfinished run (seconds; hung above its max duration)", "viz.line",
+                $"SELECT max({Instruments.ActiveRunAge}) {from} FACET {Attributes.Workload} SINCE 1 day ago TIMESERIES",
+                7, 10, 6, 3),
         ];
     }
 

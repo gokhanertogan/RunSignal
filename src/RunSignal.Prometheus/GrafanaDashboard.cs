@@ -21,7 +21,15 @@ public static class GrafanaDashboard
     public static string Generate(IEnumerable<WorkloadManifest> manifests)
     {
         ArgumentNullException.ThrowIfNull(manifests);
-        var services = manifests.Select(m => m.Service).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        var list = manifests.ToList();
+        var services = list.Select(m => m.Service).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        var q = new Queries(list
+            .SelectMany(m => m.Workloads)
+            .Where(w => w.Reporting == WorkloadReporting.PerRun)
+            .Select(w => w.Name)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList());
 
         var dashboard = new JsonObject
         {
@@ -48,23 +56,25 @@ public static class GrafanaDashboard
             },
             ["panels"] = new JsonArray(
                 Panel(1, "Runs in the last hour", "stat", 0, 0, 6, 6, "short",
-                    ("{{runsignal_outcome}}", $"sum by (runsignal_outcome) (increase(runsignal_workload_runs_total{{{Filter}}}[1h]))")),
+                    ("{{runsignal_outcome}}", q.Counted("runsignal_outcome", "runsignal_workload_runs_total", "", "1h"))),
                 Panel(2, "Firing RunSignal alerts", "table", 6, 0, 18, 6, "short",
                     ("", "count by (job, runsignal_workload, runsignal_alert, severity) (ALERTS{alertstate=\"firing\", runsignal_alert!=\"\", " + Filter + "})"),
                     instant: true),
                 Panel(3, "Runs by outcome", "timeseries", 0, 6, 12, 8, "short",
-                    ("{{runsignal_workload}} {{runsignal_outcome}}", $"sum by (runsignal_workload, runsignal_outcome) (increase(runsignal_workload_runs_total{{{Filter}}}[$__rate_interval]))")),
+                    ("{{runsignal_workload}} {{runsignal_outcome}}", q.Counted("runsignal_workload, runsignal_outcome", "runsignal_workload_runs_total", "", "$__rate_interval"))),
                 Panel(4, "Run duration (p95)", "timeseries", 12, 6, 12, 8, "s",
-                    ("{{runsignal_workload}}", $"histogram_quantile(0.95, sum by (runsignal_workload, le) (rate(runsignal_workload_duration_seconds_bucket{{{Filter}}}[$__rate_interval])))")),
+                    ("{{runsignal_workload}}", $"histogram_quantile(0.95, {q.Counted("runsignal_workload, le", "runsignal_workload_duration_seconds_bucket", "", "$__rate_interval")})")),
                 Panel(5, "Time since last success", "timeseries", 0, 14, 12, 8, "s",
-                    ("{{runsignal_workload}}", $"max by (runsignal_workload) (runsignal_workload_since_success_seconds{{{Filter}}})")),
+                    ("{{runsignal_workload}}", q.SinceSuccess())),
                 Panel(6, "Time since last heartbeat", "timeseries", 12, 14, 12, 8, "s",
                     ("{{runsignal_workload}}", $"max by (runsignal_workload) (runsignal_workload_since_heartbeat_seconds{{{Filter}}})")),
                 Panel(7, "Items processed and failed", "timeseries", 0, 22, 12, 8, "short",
-                    ("{{runsignal_workload}} {{runsignal_item_result}}", $"sum by (runsignal_workload, runsignal_item_result) (increase(runsignal_workload_items_total{{{Filter}}}[$__rate_interval]))")),
+                    ("{{runsignal_workload}} {{runsignal_item_result}}", q.Counted("runsignal_workload, runsignal_item_result", "runsignal_workload_items_total", "", "$__rate_interval"))),
                 Panel(8, "Failed runs by error type (24h)", "table", 12, 22, 12, 8, "short",
-                    ("", $"sum by (runsignal_workload, error_type) (increase(runsignal_workload_runs_total{{{Filter}, runsignal_outcome=\"failure\"}}[24h])) > 0"),
-                    instant: true)),
+                    ("", q.Counted("runsignal_workload, error_type", "runsignal_workload_runs_total", ", runsignal_outcome=\"failure\"", "24h") + " > 0"),
+                    instant: true),
+                Panel(9, "Oldest unfinished run (hung when above its max duration)", "timeseries", 0, 30, 24, 8, "s",
+                    ("{{runsignal_workload}}", $"max by (runsignal_workload) (runsignal_workload_active_run_age_seconds{{{Filter}}})"))),
         };
 
         using var stream = new MemoryStream();
@@ -126,4 +136,33 @@ public static class GrafanaDashboard
     };
 
     private static JsonObject Datasource() => new() { ["type"] = "prometheus", ["uid"] = "${datasource}" };
+
+    // Counters of long-running processes keep one series, so increase() counts what happened in a window. A per-run
+    // workload exports each run as its own short series (a new service.instance.id), which increase() cannot see
+    // grow; its final value is the run's whole contribution, so those series are summed with max_over_time instead,
+    // as the alert rules do. The manifests say which workloads report per run.
+    private sealed class Queries(IReadOnlyList<string> perRun)
+    {
+        // Workload names allow '.', which a PromQL regex needs escaped; in the string literal that is "\\.".
+        private readonly string _perRun = string.Join("|", perRun.Select(n => n.Replace(".", "\\\\.", StringComparison.Ordinal)));
+
+        public string Counted(string by, string metric, string extra, string window)
+        {
+            if (_perRun.Length == 0)
+                return $"sum by ({by}) (increase({metric}{{{Filter}{extra}}}[{window}]))";
+            return $"sum by ({by}) (increase({metric}{{{Filter}{extra}, runsignal_workload!~\"{_perRun}\"}}[{window}])" +
+                   $" or max_over_time({metric}{{{Filter}{extra}, runsignal_workload=~\"{_perRun}\"}}[{window}]))";
+        }
+
+        // since_success is only reported while a per-run workload is running, so its age comes from the time of its
+        // last successful run instead.
+        public string SinceSuccess()
+        {
+            var gauge = $"max by (runsignal_workload) (runsignal_workload_since_success_seconds{{{Filter}}})";
+            if (_perRun.Length == 0)
+                return gauge;
+            return $"max by (runsignal_workload) (runsignal_workload_since_success_seconds{{{Filter}, runsignal_workload!~\"{_perRun}\"}})" +
+                   $" or (time() - max by (runsignal_workload) (max_over_time(timestamp(runsignal_workload_runs_total{{{Filter}, runsignal_workload=~\"{_perRun}\", runsignal_outcome=\"success\"}})[7d:1m])))";
+        }
+    }
 }

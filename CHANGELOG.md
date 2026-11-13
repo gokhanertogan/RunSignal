@@ -4,6 +4,17 @@ All notable changes to RunSignal are recorded here. Every SDK and package in thi
 with the same version number. The project follows [Semantic Versioning](https://semver.org/); until 1.0, minor
 versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+- Dashboards: a panel or widget for the oldest unfinished run (`active_run_age`, what `hung` alerts on) on the
+  Grafana and New Relic dashboards. The New Relic workload table shows each workload's last success as a date.
+
+### Fixed
+- Grafana dashboard: per-run workloads (`runsignal exec`, `discover kubernetes`) showed no runs, items or durations,
+  because each run is its own series and `increase()` cannot see it grow. Their series are now summed per run, and
+  their last success comes from successful runs.
+
 ## 0.3.0 (2026-11-10)
 
 ### Added
